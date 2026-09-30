@@ -44,7 +44,7 @@ A real-time multi-client chat application developed using **TCP Socket Programmi
 +---------+ +---------+ +---------+
 | Client 1| | Client 2| | Client N|
 +---------+ +---------+ +---------+
-
+```
 
 ## Project Requirements
 
@@ -79,4 +79,3 @@ The complete Software Requirements Specification (SRS) includes:
 **Problem Statement:** Chat Application (Socket Programming)
 **Version:** 1.0
 
-````
