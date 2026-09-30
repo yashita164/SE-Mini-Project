@@ -1,4 +1,3 @@
-````
 # Chat Application — Socket Programming
 
 A real-time multi-client chat application developed using **TCP Socket Programming** and a **client-server architecture**.
@@ -27,62 +26,49 @@ A real-time multi-client chat application developed using **TCP Socket Programmi
 
 ## Architecture
 
-```text
-       +----------------+
-       |     Server     |
-       |----------------|
-       | Authentication |
-       | Message Router |
-       | Room Manager   |
-       | File Transfer  |
-       | Admin Module   |
-       +-------+--------+
-               |
-        TCP Socket Connection
-        /        |        \
-       /         |         \
-+---------+ +---------+ +---------+
-| Client 1| | Client 2| | Client N|
-+---------+ +---------+ +---------+
-````
-````
+**Client 1** ──┐  
+**Client 2** ──┼──► **Chat Server**  
+**Client N** ──┘  
+
+The server handles:
+
+- Authentication
+- Message Routing
+- Room Management
+- File Transfer
+- Administration
+
 ## Project Requirements
 
-* Real-time message delivery using TCP sockets
-* Support for multiple concurrent clients
-* Persistent chat history
-* Secure authentication and communication
-* Reliable connection and disconnection handling
+- Real-time message delivery using TCP sockets
+- Support for multiple concurrent clients
+- Persistent chat history
+- Secure authentication and communication
+- Reliable connection and disconnection handling
 
 ## Documentation
 
 The complete **Software Requirements Specification (SRS)** includes:
 
-* Functional and Non-Functional Requirements
-* Security Requirements
-* UML Use-Case Diagrams
-* Acceptance Tests
-* Requirements Traceability Matrix (RTM)
+- Functional and Non-Functional Requirements
+- Security Requirements
+- UML Use-Case Diagrams
+- Acceptance Tests
+- Requirements Traceability Matrix (RTM)
 
 ## Team
 
 **Team 5**
 
-| Name                   | SRN           |
-| ---------------------- | ------------- |
+| Name | SRN |
+|---|---|
 | Sakshi Srinivas Ghodke | PES2UG24CS914 |
-| Yashita Anand          | PES2UG24CS613 |
-| Ujwal K                | PES2UG24C566  |
-| Varun Sahu             | PES2UG24CS576 |
+| Yashita Anand | PES2UG24CS613 |
+| Ujwal K | PES2UG24C566 |
+| Varun Sahu | PES2UG24CS576 |
 
 ## Project Information
 
-**Course:** Software Engineering
-
-**Problem Statement:** Chat Application (Socket Programming)
-
+**Course:** Software Engineering  
+**Problem Statement:** Chat Application (Socket Programming)  
 **Version:** 1.0
-
-````
-
-
