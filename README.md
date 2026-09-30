@@ -1,4 +1,4 @@
-````markdown
+````
 # Chat Application — Socket Programming
 
 A real-time multi-client chat application developed using **TCP Socket Programming** and a **client-server architecture**.
@@ -11,7 +11,7 @@ A real-time multi-client chat application developed using **TCP Socket Programmi
 - Online/offline user presence
 - Typing indicators
 - Message delivery acknowledgements
-- Chat history
+- Persistent chat history
 - File transfer
 - Admin announcements and moderation
 - Connection monitoring and reconnection handling
@@ -44,8 +44,8 @@ A real-time multi-client chat application developed using **TCP Socket Programmi
 +---------+ +---------+ +---------+
 | Client 1| | Client 2| | Client N|
 +---------+ +---------+ +---------+
-```
-
+````
+````
 ## Project Requirements
 
 * Real-time message delivery using TCP sockets
@@ -56,9 +56,9 @@ A real-time multi-client chat application developed using **TCP Socket Programmi
 
 ## Documentation
 
-The complete Software Requirements Specification (SRS) includes:
+The complete **Software Requirements Specification (SRS)** includes:
 
-* Functional & Non-Functional Requirements
+* Functional and Non-Functional Requirements
 * Security Requirements
 * UML Use-Case Diagrams
 * Acceptance Tests
@@ -68,14 +68,21 @@ The complete Software Requirements Specification (SRS) includes:
 
 **Team 5**
 
-* Sakshi Srinivas Ghodke — PES2UG24CS914
-* Yashita Anand — PES2UG24CS613
-* Ujwal K — PES2UG24C566
-* Varun Sahu — PES2UG24CS576
+| Name                   | SRN           |
+| ---------------------- | ------------- |
+| Sakshi Srinivas Ghodke | PES2UG24CS914 |
+| Yashita Anand          | PES2UG24CS613 |
+| Ujwal K                | PES2UG24C566  |
+| Varun Sahu             | PES2UG24CS576 |
 
-## Project
+## Project Information
 
 **Course:** Software Engineering
+
 **Problem Statement:** Chat Application (Socket Programming)
+
 **Version:** 1.0
+
+````
+
 
