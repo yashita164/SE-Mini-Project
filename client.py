@@ -1,30 +1,32 @@
-
 """Console client for the Team 5 TCP chat application."""
 
 import json
 import queue
 import socket
 import threading
+import time
 
 HOST = "127.0.0.1"
 PORT = 5000
 MAX_RESPONSE_BYTES = 65_536
 
-responses = queue.Queue()
-stop_event = threading.Event()
-
 
 def send_json(sock, lock, payload):
+    """Send one newline-delimited JSON request."""
     data = (
-        json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
+        json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ) + "\n"
     ).encode("utf-8")
 
     with lock:
         sock.sendall(data)
 
 
-def receive_messages(sock):
-    """Read the socket in one thread and pass responses to the command loop."""
+def receive_messages(sock, responses, stop_event):
+    """Read socket responses in one thread and queue them for the command loop."""
     try:
         with sock.makefile("rb") as stream:
             while not stop_event.is_set():
@@ -33,7 +35,10 @@ def receive_messages(sock):
                 if not line:
                     break
 
-                if len(line) > MAX_RESPONSE_BYTES or not line.endswith(b"\n"):
+                if (
+                    len(line) > MAX_RESPONSE_BYTES
+                    or not line.endswith(b"\n")
+                ):
                     responses.put({
                         "type": "ERROR",
                         "message": "Invalid or oversized server response.",
@@ -49,9 +54,17 @@ def receive_messages(sock):
                     })
                     continue
 
+                if not isinstance(message, dict):
+                    responses.put({
+                        "type": "ERROR",
+                        "message": "Unexpected server response format.",
+                    })
+                    continue
+
                 if message.get("type") == "NEW_MESSAGE":
                     print(
-                        f"\n[Private message from {message.get('fromUser', 'unknown')}] "
+                        f"\n[Private message from "
+                        f"{message.get('fromUser', 'unknown')}] "
                         f"{message.get('content', '')}\n> ",
                         end="",
                         flush=True,
@@ -59,28 +72,98 @@ def receive_messages(sock):
                 else:
                     responses.put(message)
 
-    except (OSError, ConnectionError):
+    except (OSError, ConnectionError, ValueError):
         pass
     finally:
         stop_event.set()
 
 
-def wait_for_response(expected_type, timeout=10):
-    """Wait for a particular response without consuming other response types."""
+def wait_for_response(
+    responses,
+    expected_type,
+    stop_event,
+    timeout=10,
+):
+    """Wait for a particular response while preserving unrelated responses."""
     deferred = []
+    deadline = time.monotonic() + timeout
 
     try:
         while True:
-            message = responses.get(timeout=timeout)
+            remaining = deadline - time.monotonic()
+
+            if remaining <= 0:
+                print(
+                    f"No {expected_type} response received "
+                    f"within {timeout} seconds."
+                )
+                return None
+
+            try:
+                message = responses.get(timeout=remaining)
+            except queue.Empty:
+                print(
+                    f"No {expected_type} response received "
+                    f"within {timeout} seconds."
+                )
+                return None
 
             if message.get("type") == expected_type:
                 return message
 
             deferred.append(message)
 
-    except queue.Empty:
-        print(f"No {expected_type} response received within {timeout} seconds.")
-        return None
+            if stop_event.is_set() and responses.empty():
+                print("Connection closed before the expected response arrived.")
+                return None
+
+    finally:
+        for message in deferred:
+            responses.put(message)
+
+
+def wait_for_message_result(
+    responses,
+    stop_event,
+    timeout=10,
+):
+    """Wait for a message delivery result without losing unrelated responses."""
+    expected_types = {
+        "MESSAGE_DELIVERED",
+        "MESSAGE_STORED",
+        "MESSAGE_ERROR",
+    }
+    deferred = []
+    deadline = time.monotonic() + timeout
+
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+
+            if remaining <= 0:
+                print(
+                    f"No message confirmation received within "
+                    f"{timeout} seconds."
+                )
+                return None
+
+            try:
+                message = responses.get(timeout=remaining)
+            except queue.Empty:
+                print(
+                    f"No message confirmation received within "
+                    f"{timeout} seconds."
+                )
+                return None
+
+            if message.get("type") in expected_types:
+                return message
+
+            deferred.append(message)
+
+            if stop_event.is_set() and responses.empty():
+                print("Connection closed before message confirmation arrived.")
+                return None
 
     finally:
         for message in deferred:
@@ -88,32 +171,45 @@ def wait_for_response(expected_type, timeout=10):
 
 
 def display_response(message):
+    """Display a server response without exposing the session token."""
     if message is None:
         return
 
     safe_message = dict(message)
     safe_message.pop("token", None)
-    print("[Server] " + json.dumps(safe_message, ensure_ascii=False))
+
+    print(
+        "[Server] "
+        + json.dumps(safe_message, ensure_ascii=False)
+    )
 
 
 def main():
+    """Run the interactive console client."""
+    responses = queue.Queue()
+    stop_event = threading.Event()
     send_lock = threading.Lock()
     token = None
     sock = None
 
     try:
-        sock = socket.create_connection((HOST, PORT), timeout=5)
+        sock = socket.create_connection(
+            (HOST, PORT),
+            timeout=5,
+        )
         sock.settimeout(None)
+
     except OSError as error:
         print(f"Could not connect to {HOST}:{PORT}: {error}")
         print("Start server.py first.")
         return
 
-    threading.Thread(
+    receiver = threading.Thread(
         target=receive_messages,
-        args=(sock,),
+        args=(sock, responses, stop_event),
         daemon=True,
-    ).start()
+    )
+    receiver.start()
 
     print("\n=== Team 5 TCP Chat ===")
     print("Commands: register, login, msg, history, logout, quit")
@@ -134,7 +230,13 @@ def main():
                     "username": username,
                     "password": password,
                 })
-                display_response(wait_for_response("REGISTER_RESPONSE"))
+
+                response = wait_for_response(
+                    responses,
+                    "REGISTER_RESPONSE",
+                    stop_event,
+                )
+                display_response(response)
 
             elif command == "login":
                 if token:
@@ -150,7 +252,11 @@ def main():
                     "password": password,
                 })
 
-                response = wait_for_response("LOGIN_RESPONSE")
+                response = wait_for_response(
+                    responses,
+                    "LOGIN_RESPONSE",
+                    stop_event,
+                )
                 display_response(response)
 
                 if response and response.get("status") == "OK":
@@ -172,21 +278,11 @@ def main():
                     "content": content,
                 })
 
-                # The server may return MESSAGE_DELIVERED, MESSAGE_STORED,
-                # or MESSAGE_ERROR.
-                expected = {
-                    "MESSAGE_DELIVERED",
-                    "MESSAGE_STORED",
-                    "MESSAGE_ERROR",
-                }
-                response = None
-                for _ in range(3):
-                    candidate = responses.get(timeout=10)
-                    if candidate.get("type") in expected:
-                        response = candidate
-                        break
-                    display_response(candidate)
-
+                response = wait_for_message_result(
+                    responses,
+                    stop_event,
+                    timeout=10,
+                )
                 display_response(response)
 
             elif command == "history":
@@ -198,14 +294,21 @@ def main():
                     "type": "HISTORY_REQUEST",
                     "token": token,
                 })
-                response = wait_for_response("HISTORY_RESPONSE")
+
+                response = wait_for_response(
+                    responses,
+                    "HISTORY_RESPONSE",
+                    stop_event,
+                )
                 display_response(response)
 
                 if response:
                     for item in response.get("messages", []):
                         print(
-                            f"{item['sender']} -> {item['recipient']}: "
-                            f"{item['content']} ({item['created_at']})"
+                            f"{item.get('sender', '?')} -> "
+                            f"{item.get('recipient', '?')}: "
+                            f"{item.get('content', '')} "
+                            f"({item.get('created_at', '')})"
                         )
 
             elif command == "logout":
@@ -217,26 +320,41 @@ def main():
                     "type": "LOGOUT_REQUEST",
                     "token": token,
                 })
-                response = wait_for_response("LOGOUT_RESPONSE")
+
+                response = wait_for_response(
+                    responses,
+                    "LOGOUT_RESPONSE",
+                    stop_event,
+                )
                 display_response(response)
-                token = None
+
+                if response and response.get("status") == "OK":
+                    token = None
 
             elif command == "quit":
                 break
 
             elif command:
-                print("Unknown command. Use register, login, msg, history, logout, or quit.")
+                print(
+                    "Unknown command. Use register, login, msg, "
+                    "history, logout, or quit."
+                )
 
-    except (OSError, queue.Empty) as error:
+    except (OSError, ConnectionError) as error:
         print(f"Communication error: {error}")
+
     finally:
         stop_event.set()
+
         if sock:
             try:
                 sock.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
+
             sock.close()
+
+        receiver.join(timeout=1)
         print("Disconnected.")
 
 
