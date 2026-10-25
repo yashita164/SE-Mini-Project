@@ -1,3 +1,4 @@
+
 """TCP server integration tests for the Team 5 chat application."""
 
 import json
@@ -63,6 +64,7 @@ def running_server(tmp_path, monkeypatch):
     test_server = server.ChatServer(
         (HOST, 0), server.ChatHandler
     )
+
     test_server_thread = threading.Thread(
         target=test_server.serve_forever,
         daemon=True,
@@ -94,7 +96,9 @@ class ChatTestClient:
         send_json(self.sock, payload)
 
     def receive(self, timeout=SOCKET_TIMEOUT):
-        return receive_json(self.sock, self.stream, timeout)
+        return receive_json(
+            self.sock, self.stream, timeout
+        )
 
     def register(self, username, password="SecurePass123"):
         self.send({
@@ -110,6 +114,7 @@ class ChatTestClient:
             "username": username,
             "password": password,
         })
+
         response = self.receive()
 
         if response.get("status") == "OK":
@@ -230,7 +235,9 @@ def test_message_is_saved_in_history(running_server):
         register_and_login(alice, "history_alice")
         register_and_login(bob, "history_bob")
 
-        alice.send_message("history_bob", "Persist this message")
+        alice.send_message(
+            "history_bob", "Persist this message"
+        )
 
         incoming = bob.receive()
         assert incoming["type"] == "NEW_MESSAGE"
@@ -238,6 +245,7 @@ def test_message_is_saved_in_history(running_server):
 
         for client in (alice, bob):
             history = client.request_history()
+
             assert history["type"] == "HISTORY_RESPONSE"
             assert any(
                 message["content"] == "Persist this message"
@@ -254,6 +262,7 @@ def test_history_survives_reconnect(running_server):
 
         with ChatTestClient(running_server) as bob:
             register_and_login(bob, "reconnect_bob")
+
             alice.send_message(
                 "reconnect_bob", "Saved before reconnect"
             )
@@ -298,7 +307,9 @@ def test_offline_message_is_stored(running_server):
 def test_unauthenticated_message_is_rejected(running_server):
     """Sending a message without authentication is rejected."""
     with ChatTestClient(running_server) as client:
-        registration = client.register("unauthenticated_sender")
+        registration = client.register(
+            "unauthenticated_sender"
+        )
         assert registration["status"] == "OK"
 
         client.send({
@@ -371,10 +382,76 @@ def test_empty_message_is_rejected(running_server):
 def test_unknown_recipient_is_rejected(running_server):
     """Messages to nonexistent recipients return 404."""
     with ChatTestClient(running_server) as alice:
-        register_and_login(alice, "unknownrecipient_alice")
+        register_and_login(
+            alice, "unknownrecipient_alice"
+        )
 
         alice.send_message("no_such_user", "Hello?")
 
         response = alice.receive()
         assert response["type"] == "MESSAGE_ERROR"
         assert response["code"] == 404
+
+
+def test_typing_indicator_is_sent_to_recipient_and_clears(
+    running_server,
+):
+    """Typing true/false events reach the target and no unrelated client."""
+    with (
+        ChatTestClient(running_server) as alice,
+        ChatTestClient(running_server) as bob,
+        ChatTestClient(running_server) as charlie,
+    ):
+        register_and_login(alice, "typing_alice")
+        register_and_login(bob, "typing_bob")
+        register_and_login(charlie, "typing_charlie")
+
+        alice.send({
+            "type": "TYPING",
+            "token": alice.token,
+            "toUser": "typing_bob",
+            "isTyping": True,
+        })
+
+        started = bob.receive()
+        assert started["type"] == "TYPING_INDICATOR"
+        assert started["fromUser"] == "typing_alice"
+        assert started["isTyping"] is True
+
+        response = alice.receive()
+        assert response["type"] == "TYPING_RESPONSE"
+        assert response["status"] == "OK"
+
+        alice.send({
+            "type": "TYPING",
+            "token": alice.token,
+            "toUser": "typing_bob",
+            "isTyping": False,
+        })
+
+        stopped = bob.receive()
+        assert stopped["type"] == "TYPING_INDICATOR"
+        assert stopped["fromUser"] == "typing_alice"
+        assert stopped["isTyping"] is False
+
+        response = alice.receive()
+        assert response["type"] == "TYPING_RESPONSE"
+        assert response["status"] == "OK"
+
+        expect_no_message(charlie.sock, charlie.stream)
+
+
+def test_typing_indicator_requires_authentication(running_server):
+    """Unauthenticated clients cannot broadcast typing events."""
+    with ChatTestClient(running_server) as client:
+        client.send({
+            "type": "TYPING",
+            "token": "invalid-token",
+            "toUser": "someone",
+            "isTyping": True,
+        })
+
+        response = client.receive()
+        assert response["type"] == "TYPING_RESPONSE"
+        assert response["status"] == "ERROR"
+        assert response["code"] == 401
