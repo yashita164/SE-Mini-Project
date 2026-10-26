@@ -83,6 +83,7 @@ class ChatHandler(socketserver.StreamRequestHandler):
         self.username = None
 
         self.token = None
+        self.close_after_request = False
         self.file_transfers = {}
 
     def handle(self):
@@ -138,6 +139,10 @@ class ChatHandler(socketserver.StreamRequestHandler):
                 try:
 
                     self.process_request(request)
+
+                    if self.close_after_request:
+
+                        break
 
                 except (OSError, RuntimeError):
 
@@ -298,6 +303,10 @@ class ChatHandler(socketserver.StreamRequestHandler):
                 "message": "Invalid credentials.",
 
             })
+
+            # A rejected login ends this connection; retries reconnect first.
+
+            self.close_after_request = True
 
             return
 

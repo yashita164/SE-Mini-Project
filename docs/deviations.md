@@ -9,6 +9,7 @@
 | Requirement | How the implementation differs or falls short | Reason | Impact | Planned sprint |
 |---|---|---|---|---|
 | CHAT-SR-002 (SRS 5.1.2): passwords never transmitted or stored in plaintext | **Stored:** compliant. Passwords are hashed with bcrypt and a unique per-password salt before they are written to the database. **Transmitted:** not compliant. The client sends the password to the server in plaintext inside the `REGISTER_REQUEST` / `LOGIN_REQUEST` JSON over plain TCP. | CHAT-SR-001 (TLS) is not implemented yet, so the connection is not encrypted. | Anyone who can observe the network path can read the password. The server binds to `127.0.0.1` for development, which limits exposure to the local machine. | Resolved when CHAT-SR-001 (TLS) is delivered. |
+| CHAT-F-002 (SRS 4.1): retrying login on the same TCP connection is unspecified. | The server returns an invalid-credentials response and closes the socket. A client must reconnect before retrying login. | Keep authentication attempts isolated and satisfy TC-Auth-02's socket-close behavior. | A user who mistypes a password must reconnect before trying again. | Sprint 1 |
 
 ## 2. Protocol choices the SAD does not fix
 

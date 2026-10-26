@@ -1,2 +1,2 @@
-bcrypt
-pytest
+bcrypt==5.0.0
+pytest==9.1.0

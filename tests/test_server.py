@@ -274,6 +274,9 @@ def test_server_rejects_invalid_login(running_server):
 
         assert response["code"] == 401
 
+        # A rejected login closes the socket; the client must reconnect.
+        assert client.stream.readline() == b""
+
 def test_server_rejects_duplicate_registration(running_server):
 
     """Duplicate usernames are rejected."""
@@ -862,6 +865,9 @@ def test_sec_02_no_plaintext_password_in_server_logs(
         assert client.register("log_user", good_password)["status"] == "OK"
         assert client.register("log_user", good_password)["status"] == "ERROR"
         assert client.login("log_user", wrong_password)["status"] == "ERROR"
+
+    # A failed login closes its connection, so retry on a fresh client socket.
+    with ChatTestClient(running_server) as client:
         assert client.login("log_user", good_password)["status"] == "OK"
 
     # Allow the handler thread to log the disconnect before reading output.
