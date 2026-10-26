@@ -4,6 +4,7 @@
 import json
 import socket
 import threading
+import time
 
 import pytest
 
@@ -462,6 +463,22 @@ def test_typing_indicator_requires_authentication(running_server):
 # ---------------------------------------------------------------------------
 
 
+def wait_for_no_pending(username, timeout=3):
+    """Poll until a user has no queued messages left.
+
+    The server marks a message delivered just after writing it to the socket,
+    so a client can receive it a moment before the database is updated.
+    """
+    deadline = time.monotonic() + timeout
+
+    while time.monotonic() < deadline:
+        if not database.get_pending_messages(username):
+            return True
+        time.sleep(0.05)
+
+    return not database.get_pending_messages(username)
+
+
 def register_offline_user(running_server, username):
     """Register a user and disconnect, leaving them offline."""
     with ChatTestClient(running_server) as client:
@@ -549,7 +566,7 @@ def test_msg_03_queued_messages_are_delivered_only_once(running_server):
         assert bob.login("once_bob")["status"] == "OK"
         assert bob.receive()["content"] == "deliver me once"
 
-    assert database.get_pending_messages("once_bob") == []
+    assert wait_for_no_pending("once_bob")
 
     with ChatTestClient(running_server) as bob_again:
         assert bob_again.login("once_bob")["status"] == "OK"
