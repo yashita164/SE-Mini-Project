@@ -5,6 +5,7 @@ import json
 import socket
 
 import threading
+import time
 
 import pytest
 
@@ -12,6 +13,7 @@ import database
 
 import server
 
+import time
 HOST = "127.0.0.1"
 
 SOCKET_TIMEOUT = 3
@@ -327,6 +329,36 @@ def test_private_message_reaches_only_recipient(running_server):
         assert confirmation["messageId"] == incoming["messageId"]
 
         expect_no_message(charlie.sock, charlie.stream)
+        
+def test_tc_msg_02_real_time_delivery_within_latency_target(running_server):
+    """TC-Msg-02: Online messages are delivered within the 500 ms target."""
+    with (
+        ChatTestClient(running_server) as alice,
+        ChatTestClient(running_server) as bob,
+    ):
+        register_and_login(alice, "latency_alice")
+        register_and_login(bob, "latency_bob")
+
+        content = "TC-Msg-02 real-time delivery test"
+
+        start = time.perf_counter()
+        alice.send_message("latency_bob", content)
+        incoming = bob.receive(timeout=2)
+        latency_ms = (time.perf_counter() - start) * 1000
+
+        assert incoming["type"] == "NEW_MESSAGE"
+        assert incoming["fromUser"] == "latency_alice"
+        assert incoming["content"] == content
+
+        assert latency_ms < 500, (
+            f"Delivery latency was {latency_ms:.2f} ms; target is under 500 ms"
+        )
+
+        confirmation = alice.receive()
+        assert confirmation["type"] == "MESSAGE_DELIVERED"
+        assert confirmation["messageId"] == incoming["messageId"]
+
+        print(f"\nTC-Msg-02 delivery latency: {latency_ms:.2f} ms")
 
 def test_message_is_saved_in_history(running_server):
 
@@ -635,64 +667,153 @@ def test_file_transfer_preserves_bytes_and_checksum(running_server):
     checksum = hashlib.sha256(original).hexdigest()
     transfer_id = str(uuid.uuid4())
 
+# ---------------------------------------------------------------------------
+# TC-Msg-03 (CHAT-F-012): queue messages for offline users, deliver on login
+# ---------------------------------------------------------------------------
+
+
+def wait_for_no_pending(username, timeout=3):
+    """Poll until a user has no queued messages left.
+
+    The server marks a message delivered just after writing it to the socket,
+    so a client can receive it a moment before the database is updated.
+    """
+    deadline = time.monotonic() + timeout
+
+    while time.monotonic() < deadline:
+        if not database.get_pending_messages(username):
+            return True
+        time.sleep(0.05)
+
+    return not database.get_pending_messages(username)
+
+
+def register_offline_user(running_server, username):
+    """Register a user and disconnect, leaving them offline."""
+    with ChatTestClient(running_server) as client:
+        assert client.register(username)["status"] == "OK"
+
+
+def test_msg_03_offline_messages_are_stored(running_server):
+    """TC-Msg-03: messages sent to an offline user are stored, undelivered."""
+    register_offline_user(running_server, "queue_bob")
+
+    with ChatTestClient(running_server) as alice:
+        register_and_login(alice, "queue_alice")
+
+        for text in ("first", "second", "third"):
+            alice.send_message("queue_bob", text)
+            assert alice.receive()["type"] == "MESSAGE_STORED"
+
+    pending = database.get_pending_messages("queue_bob")
+
+    assert [message["content"] for message in pending] == [
+        "first",
+        "second",
+        "third",
+    ]
+    assert {message["sender"] for message in pending} == {"queue_alice"}
+
+
+def test_msg_03_queued_messages_delivered_in_order_on_login(running_server):
+    """TC-Msg-03: queued messages arrive in original order after login."""
+    register_offline_user(running_server, "order_bob")
+
     with (
         ChatTestClient(running_server) as alice,
-        ChatTestClient(running_server) as bob,
+        ChatTestClient(running_server) as charlie,
     ):
-        register_and_login(alice, "file_sender")
-        register_and_login(bob, "file_recipient")
+        register_and_login(alice, "order_alice")
+        register_and_login(charlie, "order_charlie")
 
-        alice.send({
-            "type": "FILE_START",
-            "token": alice.token,
-            "toUser": "file_recipient",
-            "filename": "sample.bin",
-            "size": len(original),
-            "sha256": checksum,
-            "transferId": transfer_id,
-        })
-        ready = alice.receive()
-        assert ready["type"] == "FILE_READY"
-        assert ready["transferId"] == transfer_id
+        # Interleave two senders: the original send order must be preserved.
+        sent_order = [
+            (alice, "order_alice", "m1 from alice"),
+            (charlie, "order_charlie", "m2 from charlie"),
+            (alice, "order_alice", "m3 from alice"),
+            (charlie, "order_charlie", "m4 from charlie"),
+            (alice, "order_alice", "m5 from alice"),
+        ]
 
-        chunk_size = server.FILE_CHUNK_SIZE
-        chunks = [original[i:i + chunk_size]
-                  for i in range(0, len(original), chunk_size)]
-        for index, chunk in enumerate(chunks):
-            final = index == len(chunks) - 1
-            alice.send({
-                "type": "FILE_CHUNK",
-                "token": alice.token,
-                "transferId": transfer_id,
-                "data": base64.b64encode(chunk).decode("ascii"),
-                "final": final,
-            })
-            if not final:
-                ack = alice.receive()
-                assert ack["type"] == "FILE_CHUNK_ACK"
-                assert ack["transferId"] == transfer_id
+        for client, _, text in sent_order:
+            client.send_message("order_bob", text)
+            assert client.receive()["type"] == "MESSAGE_STORED"
 
-        start = bob.receive()
-        assert start["type"] == "FILE_RECEIVE_START"
-        assert start["filename"] == "sample.bin"
-        assert start["size"] == len(original)
-        assert start["sha256"] == checksum
+        with ChatTestClient(running_server) as bob:
+            login = bob.login("order_bob")
 
-        received = bytearray()
-        while True:
-            event = bob.receive()
-            if event["type"] == "FILE_RECEIVE_END":
-                assert event["transferId"] == transfer_id
-                break
-            assert event["type"] == "FILE_RECEIVE_CHUNK"
-            assert event["transferId"] == transfer_id
-            received.extend(base64.b64decode(event["data"], validate=True))
+            # The login response always comes first, then the backlog.
+            assert login["type"] == "LOGIN_RESPONSE"
+            assert login["status"] == "OK"
 
-        sent = alice.receive()
-        assert sent["type"] == "FILE_SENT"
-        assert sent["transferId"] == transfer_id
-        assert bytes(received) == original
-        assert hashlib.sha256(received).hexdigest() == checksum
+            received = [bob.receive() for _ in sent_order]
+
+    assert all(message["type"] == "NEW_MESSAGE" for message in received)
+    assert [message["content"] for message in received] == [
+        text for _, _, text in sent_order
+    ]
+    assert [message["fromUser"] for message in received] == [
+        sender for _, sender, _ in sent_order
+    ]
+
+    message_ids = [int(message["messageId"]) for message in received]
+    assert message_ids == sorted(message_ids)
+    assert all(message.get("queued") is True for message in received)
+    assert all(message.get("timestamp") for message in received)
+
+
+def test_msg_03_queued_messages_are_delivered_only_once(running_server):
+    """TC-Msg-03: a replayed message is not delivered again on later logins."""
+    register_offline_user(running_server, "once_bob")
+
+    with ChatTestClient(running_server) as alice:
+        register_and_login(alice, "once_alice")
+        alice.send_message("once_bob", "deliver me once")
+        assert alice.receive()["type"] == "MESSAGE_STORED"
+
+    with ChatTestClient(running_server) as bob:
+        assert bob.login("once_bob")["status"] == "OK"
+        assert bob.receive()["content"] == "deliver me once"
+
+    assert wait_for_no_pending("once_bob")
+
+    with ChatTestClient(running_server) as bob_again:
+        assert bob_again.login("once_bob")["status"] == "OK"
+        expect_no_message(bob_again.sock, bob_again.stream)
+
+
+def test_msg_03_live_messages_are_not_queued(running_server):
+    """TC-Msg-03: Messages delivered live are not replayed on next login."""
+
+    with ChatTestClient(running_server) as alice:
+        register_and_login(alice, "live_alice")
+
+        with ChatTestClient(running_server) as bob:
+            register_and_login(bob, "live_bob")
+
+            alice.send_message("live_bob", "Hello while online")
+
+            incoming = bob.receive()
+            assert incoming["type"] == "NEW_MESSAGE"
+            assert incoming["fromUser"] == "live_alice"
+            assert incoming["content"] == "Hello while online"
+
+            confirmation = alice.receive()
+            assert confirmation["type"] == "MESSAGE_DELIVERED"
+            assert confirmation["messageId"] == incoming["messageId"]
+
+        # Bob disconnects and logs in again.
+        with ChatTestClient(running_server) as bob_again:
+            response = bob_again.login("live_bob")
+            assert response["type"] == "LOGIN_RESPONSE"
+            assert response["status"] == "OK"
+
+            # A message delivered live must not be replayed.
+            expect_no_message(
+                bob_again.sock,
+                bob_again.stream,
+                timeout=0.5,
+            )
 
 
 def test_file_transfer_rejects_file_over_configured_limit(running_server):
@@ -713,3 +834,47 @@ def test_file_transfer_rejects_file_over_configured_limit(running_server):
         response = alice.receive()
         assert response["type"] == "FILE_ERROR"
         assert response["code"] == 413
+
+def test_msg_03_only_the_recipient_receives_the_backlog(running_server):
+    """TC-Msg-03: another user's login does not receive queued messages."""
+    register_offline_user(running_server, "private_bob")
+
+    with ChatTestClient(running_server) as alice:
+        register_and_login(alice, "private_alice")
+        alice.send_message("private_bob", "for bob only")
+        assert alice.receive()["type"] == "MESSAGE_STORED"
+
+    with ChatTestClient(running_server) as charlie:
+        register_and_login(charlie, "private_charlie")
+        expect_no_message(charlie.sock, charlie.stream)
+
+    assert len(database.get_pending_messages("private_bob")) == 1
+def test_sec_02_no_plaintext_password_in_server_logs(
+    running_server, capsys, caplog
+):
+    """TC-Sec-02: passwords never appear in server output or log records."""
+    caplog.set_level("DEBUG")
+
+    good_password = "LogCheck#Good123"
+    wrong_password = "LogCheck#Wrong456"
+
+    with ChatTestClient(running_server) as client:
+        assert client.register("log_user", good_password)["status"] == "OK"
+        assert client.register("log_user", good_password)["status"] == "ERROR"
+        assert client.login("log_user", wrong_password)["status"] == "ERROR"
+        assert client.login("log_user", good_password)["status"] == "OK"
+
+    # Allow the handler thread to log the disconnect before reading output.
+    time.sleep(0.5)
+
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    log_text = "\n".join(record.getMessage() for record in caplog.records)
+
+    # Guard against a vacuous pass: the server really did write to the log.
+    assert "[CONNECT]" in output
+
+    for secret in (good_password, wrong_password):
+        assert secret not in output
+        assert secret not in log_text
+

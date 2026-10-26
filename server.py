@@ -36,6 +36,26 @@ ACTIVE_CLIENTS = {}
 
 ACTIVE_CLIENTS_LOCK = threading.Lock()
 
+# Serialises "store + live-deliver" (sender side) against "register + replay
+# queued messages" (login side) so a message is never delivered twice and
+# queued messages cannot be overtaken by newer live ones.
+
+DELIVERY_LOCK = threading.Lock()
+
+def to_iso_timestamp(db_timestamp):
+
+    """Convert SQLite's UTC 'YYYY-MM-DD HH:MM:SS' value to ISO 8601."""
+
+    try:
+
+        parsed = datetime.strptime(db_timestamp, "%Y-%m-%d %H:%M:%S")
+
+    except (TypeError, ValueError):
+
+        return datetime.now(timezone.utc).isoformat()
+
+    return parsed.replace(tzinfo=timezone.utc).isoformat()
+
 def send_json(client_socket, send_lock, payload):
 
     """Send one complete JSON response, terminated by a newline."""
@@ -285,6 +305,18 @@ class ChatHandler(socketserver.StreamRequestHandler):
 
         token = result["token"]
 
+        # Registering the connection, answering the login and replaying queued
+        # messages happen under one lock, so a concurrent sender can neither
+        # deliver ahead of the login response nor duplicate a queued message.
+
+        with DELIVERY_LOCK:
+
+            self.complete_login(username, token)
+
+    def complete_login(self, username, token):
+
+        """Register the connection, confirm login, then replay queued messages."""
+
         # Only one active connection per username in this initial version.
 
         with ACTIVE_CLIENTS_LOCK:
@@ -330,6 +362,43 @@ class ChatHandler(socketserver.StreamRequestHandler):
             "userId": username,
 
         })
+
+        self.deliver_queued_messages(username)
+
+    def deliver_queued_messages(self, username):
+
+        """Send messages stored while the user was offline, oldest first.
+
+        Each message is marked delivered only after it was written to the
+        socket. If the connection fails part-way, the remainder stays queued
+        and is retried on the user's next login.
+        """
+
+        for stored in database.get_pending_messages(username):
+
+            try:
+
+                send_json(self.request, self.send_lock, {
+
+                    "type": "NEW_MESSAGE",
+
+                    "messageId": str(stored["id"]),
+
+                    "fromUser": stored["sender"],
+
+                    "content": stored["content"],
+
+                    "timestamp": to_iso_timestamp(stored["created_at"]),
+
+                    "queued": True,
+
+                })
+
+            except (OSError, ConnectionError):
+
+                return
+
+            database.mark_message_delivered(stored["id"])
 
     def authenticated_username(self, request):
 
@@ -561,41 +630,11 @@ class ChatHandler(socketserver.StreamRequestHandler):
 
         recipient = recipient_user["username"]
 
-        message_id = database.save_message(sender, recipient, content)
+        message_id, timestamp, delivered = self.store_and_deliver(
 
-        timestamp = datetime.now(timezone.utc).isoformat()
+            sender, recipient, content,
 
-        with ACTIVE_CLIENTS_LOCK:
-
-            target = ACTIVE_CLIENTS.get(recipient)
-
-        delivered = False
-
-        if target is not None:
-
-            target_socket, target_lock = target
-
-            try:
-
-                send_json(target_socket, target_lock, {
-
-                    "type": "NEW_MESSAGE",
-
-                    "messageId": str(message_id),
-
-                    "fromUser": sender,
-
-                    "content": content,
-
-                    "timestamp": timestamp,
-
-                })
-
-                delivered = True
-
-            except (OSError, ConnectionError):
-
-                pass
+        )
 
         if delivered:
 
@@ -780,6 +819,58 @@ class ChatHandler(socketserver.StreamRequestHandler):
         self.reply({"type": "FILE_SENT", "transferId": transfer_id,
                     "filename": transfer["filename"], "size": len(file_data),
                     "sha256": checksum})
+    def store_and_deliver(self, sender, recipient, content):
+
+        """Persist a message, then push it live if the recipient is online.
+
+        A message that cannot be delivered right now stays flagged as
+        undelivered, which queues it for the recipient's next login.
+        Returns (message_id, timestamp, delivered).
+        """
+
+        with DELIVERY_LOCK:
+
+            message_id = database.save_message(sender, recipient, content)
+
+            timestamp = datetime.now(timezone.utc).isoformat()
+
+            with ACTIVE_CLIENTS_LOCK:
+
+                target = ACTIVE_CLIENTS.get(recipient)
+
+            delivered = False
+
+            if target is not None:
+
+                target_socket, target_lock = target
+
+                try:
+
+                    send_json(target_socket, target_lock, {
+
+                        "type": "NEW_MESSAGE",
+
+                        "messageId": str(message_id),
+
+                        "fromUser": sender,
+
+                        "content": content,
+
+                        "timestamp": timestamp,
+
+                    })
+
+                    delivered = True
+
+                except (OSError, ConnectionError):
+
+                    pass
+
+            if delivered:
+
+                database.mark_message_delivered(message_id)
+
+        return message_id, timestamp, delivered
 
     def handle_history(self, request):
 
