@@ -62,9 +62,15 @@ def receive_messages(sock, responses, stop_event):
                     continue
 
                 if message.get("type") == "NEW_MESSAGE":
+                    offline_note = (
+                        " (received while you were offline)"
+                        if message.get("queued")
+                        else ""
+                    )
                     print(
                         f"\n[Private message from "
-                        f"{message.get('fromUser', 'unknown')}] "
+                        f"{message.get('fromUser', 'unknown')}"
+                        f"{offline_note}] "
                         f"{message.get('content', '')}\n> ",
                         end="",
                         flush=True,
