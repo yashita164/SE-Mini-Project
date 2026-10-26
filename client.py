@@ -66,7 +66,6 @@ def receive_messages(sock, responses, stop_event):
                     responses.put({"type": "ERROR", "message": "Unexpected server response format."})
                     continue
 
-<<<<<<< HEAD
                 kind = message.get("type")
                 transfer_id = message.get("transferId")
                 if kind == "NEW_MESSAGE":
@@ -121,7 +120,6 @@ def receive_messages(sock, responses, stop_event):
                               f"({len(data)} bytes; SHA-256 verified)\n> ", end="", flush=True)
                     except OSError as error:
                         print(f"\n[Could not save received file: {error}]\n> ", end="", flush=True)
-=======
                 if message.get("type") == "NEW_MESSAGE":
                     offline_note = (
                         " (received while you were offline)"
@@ -136,7 +134,6 @@ def receive_messages(sock, responses, stop_event):
                         end="",
                         flush=True,
                     )
->>>>>>> origin/main
                 else:
                     responses.put(message)
     except (OSError, ConnectionError, ValueError):
