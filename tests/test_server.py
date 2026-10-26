@@ -455,3 +455,138 @@ def test_typing_indicator_requires_authentication(running_server):
         assert response["type"] == "TYPING_RESPONSE"
         assert response["status"] == "ERROR"
         assert response["code"] == 401
+
+
+# ---------------------------------------------------------------------------
+# TC-Msg-03 (CHAT-F-012): queue messages for offline users, deliver on login
+# ---------------------------------------------------------------------------
+
+
+def register_offline_user(running_server, username):
+    """Register a user and disconnect, leaving them offline."""
+    with ChatTestClient(running_server) as client:
+        assert client.register(username)["status"] == "OK"
+
+
+def test_msg_03_offline_messages_are_stored(running_server):
+    """TC-Msg-03: messages sent to an offline user are stored, undelivered."""
+    register_offline_user(running_server, "queue_bob")
+
+    with ChatTestClient(running_server) as alice:
+        register_and_login(alice, "queue_alice")
+
+        for text in ("first", "second", "third"):
+            alice.send_message("queue_bob", text)
+            assert alice.receive()["type"] == "MESSAGE_STORED"
+
+    pending = database.get_pending_messages("queue_bob")
+
+    assert [message["content"] for message in pending] == [
+        "first",
+        "second",
+        "third",
+    ]
+    assert {message["sender"] for message in pending} == {"queue_alice"}
+
+
+def test_msg_03_queued_messages_delivered_in_order_on_login(running_server):
+    """TC-Msg-03: queued messages arrive in original order after login."""
+    register_offline_user(running_server, "order_bob")
+
+    with (
+        ChatTestClient(running_server) as alice,
+        ChatTestClient(running_server) as charlie,
+    ):
+        register_and_login(alice, "order_alice")
+        register_and_login(charlie, "order_charlie")
+
+        # Interleave two senders: the original send order must be preserved.
+        sent_order = [
+            (alice, "order_alice", "m1 from alice"),
+            (charlie, "order_charlie", "m2 from charlie"),
+            (alice, "order_alice", "m3 from alice"),
+            (charlie, "order_charlie", "m4 from charlie"),
+            (alice, "order_alice", "m5 from alice"),
+        ]
+
+        for client, _, text in sent_order:
+            client.send_message("order_bob", text)
+            assert client.receive()["type"] == "MESSAGE_STORED"
+
+        with ChatTestClient(running_server) as bob:
+            login = bob.login("order_bob")
+
+            # The login response always comes first, then the backlog.
+            assert login["type"] == "LOGIN_RESPONSE"
+            assert login["status"] == "OK"
+
+            received = [bob.receive() for _ in sent_order]
+
+    assert all(message["type"] == "NEW_MESSAGE" for message in received)
+    assert [message["content"] for message in received] == [
+        text for _, _, text in sent_order
+    ]
+    assert [message["fromUser"] for message in received] == [
+        sender for _, sender, _ in sent_order
+    ]
+
+    message_ids = [int(message["messageId"]) for message in received]
+    assert message_ids == sorted(message_ids)
+    assert all(message.get("queued") is True for message in received)
+    assert all(message.get("timestamp") for message in received)
+
+
+def test_msg_03_queued_messages_are_delivered_only_once(running_server):
+    """TC-Msg-03: a replayed message is not delivered again on later logins."""
+    register_offline_user(running_server, "once_bob")
+
+    with ChatTestClient(running_server) as alice:
+        register_and_login(alice, "once_alice")
+        alice.send_message("once_bob", "deliver me once")
+        assert alice.receive()["type"] == "MESSAGE_STORED"
+
+    with ChatTestClient(running_server) as bob:
+        assert bob.login("once_bob")["status"] == "OK"
+        assert bob.receive()["content"] == "deliver me once"
+
+    assert database.get_pending_messages("once_bob") == []
+
+    with ChatTestClient(running_server) as bob_again:
+        assert bob_again.login("once_bob")["status"] == "OK"
+        expect_no_message(bob_again.sock, bob_again.stream)
+
+
+def test_msg_03_live_messages_are_not_queued(running_server):
+    """TC-Msg-03: messages delivered live are not replayed on next login."""
+    with (
+        ChatTestClient(running_server) as alice,
+        ChatTestClient(running_server) as bob,
+    ):
+        register_and_login(alice, "live_alice")
+        register_and_login(bob, "live_bob")
+
+        alice.send_message("live_bob", "delivered live")
+        assert bob.receive()["content"] == "delivered live"
+        assert alice.receive()["type"] == "MESSAGE_DELIVERED"
+
+    assert database.get_pending_messages("live_bob") == []
+
+    with ChatTestClient(running_server) as bob_again:
+        assert bob_again.login("live_bob")["status"] == "OK"
+        expect_no_message(bob_again.sock, bob_again.stream)
+
+
+def test_msg_03_only_the_recipient_receives_the_backlog(running_server):
+    """TC-Msg-03: another user's login does not receive queued messages."""
+    register_offline_user(running_server, "private_bob")
+
+    with ChatTestClient(running_server) as alice:
+        register_and_login(alice, "private_alice")
+        alice.send_message("private_bob", "for bob only")
+        assert alice.receive()["type"] == "MESSAGE_STORED"
+
+    with ChatTestClient(running_server) as charlie:
+        register_and_login(charlie, "private_charlie")
+        expect_no_message(charlie.sock, charlie.stream)
+
+    assert len(database.get_pending_messages("private_bob")) == 1
