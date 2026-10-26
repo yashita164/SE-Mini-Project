@@ -607,3 +607,32 @@ def test_msg_03_only_the_recipient_receives_the_backlog(running_server):
         expect_no_message(charlie.sock, charlie.stream)
 
     assert len(database.get_pending_messages("private_bob")) == 1
+def test_sec_02_no_plaintext_password_in_server_logs(
+    running_server, capsys, caplog
+):
+    """TC-Sec-02: passwords never appear in server output or log records."""
+    caplog.set_level("DEBUG")
+
+    good_password = "LogCheck#Good123"
+    wrong_password = "LogCheck#Wrong456"
+
+    with ChatTestClient(running_server) as client:
+        assert client.register("log_user", good_password)["status"] == "OK"
+        assert client.register("log_user", good_password)["status"] == "ERROR"
+        assert client.login("log_user", wrong_password)["status"] == "ERROR"
+        assert client.login("log_user", good_password)["status"] == "OK"
+
+    # Allow the handler thread to log the disconnect before reading output.
+    time.sleep(0.5)
+
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    log_text = "\n".join(record.getMessage() for record in caplog.records)
+
+    # Guard against a vacuous pass: the server really did write to the log.
+    assert "[CONNECT]" in output
+
+    for secret in (good_password, wrong_password):
+        assert secret not in output
+        assert secret not in log_text
+
