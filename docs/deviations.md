@@ -10,17 +10,41 @@
 |---|---|---|---|---|
 | CHAT-SR-002 (SRS 5.1.2): passwords never transmitted or stored in plaintext | **Stored:** compliant. Passwords are hashed with bcrypt and a unique per-password salt before they are written to the database. **Transmitted:** not compliant. The client sends the password to the server in plaintext inside the `REGISTER_REQUEST` / `LOGIN_REQUEST` JSON over plain TCP. | CHAT-SR-001 (TLS) is not implemented yet, so the connection is not encrypted. | Anyone who can observe the network path can read the password. The server binds to `127.0.0.1` for development, which limits exposure to the local machine. | Resolved when CHAT-SR-001 (TLS) is delivered. |
 | CHAT-F-002 (SRS 4.1): retrying login on the same TCP connection is unspecified. | The server returns an invalid-credentials response and closes the socket. A client must reconnect before retrying login. | Keep authentication attempts isolated and satisfy TC-Auth-02's socket-close behavior. | A user who mistypes a password must reconnect before trying again. | Sprint 1 |
+| CHAT-SR-001 (SRS 5.1.2): TLS/SSL on all socket communication | Not implemented. All traffic is plain TCP and the server binds to `127.0.0.1` only. | Out of time within the two sprints; development runs on localhost. | Credentials and messages are readable by anyone who can observe the network path. Acceptable only for local development. | Not planned |
+| CHAT-F-004 (SRS 4.1) and CHAT-NF-003 (SRS 5): heartbeat and dead-connection cleanup within 30 s | Not implemented. A disconnect is detected only when the socket closes or raises an error. There is no ping/pong timeout. | Messaging, security and administration were prioritised over keep-alive handling. | A silently dropped connection stays marked online until the operating system reports it. TC-Rel-01 cannot be run as written. | Not planned |
+| CHAT-SR-005 (SRS 5.1.2): per-IP rate limiting | Not implemented. A rejected login closes the connection, but a client can reconnect and retry immediately. | Medium priority and out of time. | Brute-force login attempts are not throttled. | Not planned |
+| SRS 3.1: graphical chat window with contact list and file-attach button | The client is a console application with typed commands. | A console client was enough to demonstrate the protocol within the sprint. | No contact list, status indicators or attach button. | Not planned |
+| CHAT-F-030 (SRS 4.4): send a file to a user or a room | Files can be sent to one online user only. An offline recipient is rejected and files cannot be sent to a room. | Chunks are relayed straight to the recipient, with no server-side file storage. | No offline or group file sharing. | Not planned |
+| CHAT-F-041 (SRS 4.5): kick or ban a user from a room or the server | Moderation applies to the whole server only. There is no per-room moderation and no mute. | Rooms were added late in Sprint 2. | An administrator cannot remove a user from a single room without removing them from the server. | Not planned |
+| CHAT-NF-004 (SRS 5): history retrievable for at least 90 days | All messages are kept in the database, but the history request returns only the latest 50. | A simple limit keeps the response small. | Older messages are stored but cannot be fetched through the client. | Not planned |
+| CHAT-F-013 (SRS 4.2): the sender's UI shows a "delivered" tick | The console client prints `✓ Delivered` when the server confirms delivery, and `Saved, not delivered yet: recipient is offline` when the message is only stored. | The client is a console application. | The acknowledgement works as specified; there is no graphical tick. | Sprint 2 |
+| CHAT-F-020 to CHAT-F-023 (SRS 4.3): chat rooms and online-user lists | Rooms are kept in memory and are lost when the server restarts. Room messages are saved under the sender only, so history shows them to the sender alone. Rooms have no owner. | Persistent rooms would need extra database tables and were out of time. | Users must recreate rooms after a server restart. | Not planned |
 
 ## 2. Protocol choices the SAD does not fix
 
-_To be completed under issue #6._
+- **Framing:** each request and response is one JSON object on one line, UTF-8 encoded, ending with a newline. A request line may be at most 16 KiB; longer input gets error 413 and the connection is closed.
+- **Sessions:** a successful login returns a random session token. Every later request must carry that token, and the server checks it on each request. A connection holds one session; logging in again from another connection closes the older one.
+- **Errors:** failures use HTTP-style numeric codes in the response (400 bad request, 401 not authenticated, 404 not found, 409 conflict, 413 too large, 500 internal error).
+- **Messages:** private messages are limited to 4,000 characters. The sender gets `MESSAGE_DELIVERED` when the message was written to the recipient's connection, or `MESSAGE_STORED` when the recipient is offline. Stored messages are replayed in order at the recipient's next login.
+- **Typing indicator:** sent only to the named recipient, and only if that recipient is online.
+- **File transfer:** the sender announces the file (name, size, SHA-256 checksum), then sends 8 KiB base64 chunks. The server checks size and checksum before forwarding to the recipient, who checks them again. The size limit is 1 MiB.
+- **Administration:** administrators are the usernames listed in the `CHAT_ADMIN_USERS` environment variable of the server. Announcements, kicks and bans are written to an audit table with a timestamp and the administrator's name.
+- **Timestamps:** ISO 8601 in UTC.
 
 ## 3. SRS ambiguities and how the team resolved them
 
 | Ambiguity | Resolution |
 |---|---|
 | bcrypt only uses the first 72 bytes of a password. The SRS sets no maximum length. | Passwords must be 8-72 UTF-8 bytes; longer passwords are rejected rather than silently truncated. |
+| The SRS sets no maximum message size. | Messages are limited to 4,000 characters, inside a 16 KiB request line. Larger input is rejected with code 413. |
+| The SRS says "configured size limit" for files but gives no value. | The limit is 1 MiB per file, set as a constant in `server.py` and `client.py`. |
+| The SRS does not say how usernames are written. | Usernames are 3 to 24 letters, digits or underscores, and are not case-sensitive. |
+| The SRS does not say who an administrator is. | The server operator lists administrator usernames in the `CHAT_ADMIN_USERS` environment variable. |
 
 ## 4. Sprint 1 recovery
 
-_To be completed under issue #6._
+Sprint 1 was planned for 19–23 October. The first working prototype (registration, login, private messaging and typing indicators) and the Sprint 1 demo video were committed on 25 October, and the remaining Sprint 1 items (bcrypt verification, offline message queue, latency test, defect log, PR workflow, and authentication and CI setup) were merged on 26 October, so Sprint 1 finished about three days after its planned end.
+
+Items still open at the end of Sprint 1 were labelled `carried-from-sprint-1` and moved into Sprint 2, including the RTM update (#7) and this deviations document (#6).
+
+Recovery: the delay came from completing and integrating the remaining Sprint 1 functionality, tests and the CI and pull-request workflow after the initial prototype was committed on 25 October. The team finished these through follow-up pull requests merged on 26 October, with automated tests running in CI on every push and pull request. Only the documentation items (#6 and #7) were carried into Sprint 2, and all code work for Sprint 2 followed the same pull-request workflow.
