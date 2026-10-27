@@ -949,3 +949,78 @@ def test_tc_admin_01_non_admin_cannot_broadcast(running_server, monkeypatch):
         assert response["code"] == 403
         expect_no_message(bob.sock, bob.stream)
 
+
+def test_tc_admin_02_kick_closes_target_socket(running_server, monkeypatch):
+    """An administrator kick notifies and disconnects an online user."""
+    monkeypatch.setenv("CHAT_ADMIN_USERS", "moderation_admin")
+
+    with (
+        ChatTestClient(running_server) as admin,
+        ChatTestClient(running_server) as target,
+    ):
+        register_and_login(admin, "moderation_admin")
+        register_and_login(target, "kick_target")
+
+        admin.send({
+            "type": "ADMIN_KICK",
+            "token": admin.token,
+            "username": "kick_target",
+            "reason": "Testing moderator kick",
+        })
+
+        response = admin.receive()
+        assert response["type"] == "ADMIN_MODERATION_RESPONSE"
+        assert response["status"] == "OK"
+        assert response["action"] == "kick"
+        assert response["username"] == "kick_target"
+        assert response["disconnected"] is True
+
+        notice = target.receive()
+        assert notice["type"] == "ADMIN_MODERATION_NOTICE"
+        assert notice["action"] == "kick"
+        assert notice["adminId"] == "moderation_admin"
+        assert target.stream.readline() == b""
+
+
+def test_tc_admin_02_ban_disconnects_and_refuses_later_login(
+    running_server, monkeypatch
+):
+    """A ban disconnects the user and remains enforced at their next login."""
+    monkeypatch.setenv("CHAT_ADMIN_USERS", "moderation_admin")
+
+    with (
+        ChatTestClient(running_server) as admin,
+        ChatTestClient(running_server) as target,
+    ):
+        register_and_login(admin, "moderation_admin")
+        register_and_login(target, "ban_target")
+
+        admin.send({
+            "type": "ADMIN_BAN",
+            "token": admin.token,
+            "username": "ban_target",
+            "reason": "Repeated abuse",
+        })
+
+        response = admin.receive()
+        assert response["type"] == "ADMIN_MODERATION_RESPONSE"
+        assert response["status"] == "OK"
+        assert response["action"] == "ban"
+        assert response["username"] == "ban_target"
+        assert response["disconnected"] is True
+
+        notice = target.receive()
+        assert notice["type"] == "ADMIN_MODERATION_NOTICE"
+        assert notice["action"] == "ban"
+        assert notice["adminId"] == "moderation_admin"
+        assert target.stream.readline() == b""
+
+        assert database.is_user_banned("ban_target")
+
+    with ChatTestClient(running_server) as banned_user:
+        response = banned_user.login("ban_target")
+        assert response["type"] == "LOGIN_RESPONSE"
+        assert response["status"] == "ERROR"
+        assert response["code"] == 403
+        assert banned_user.stream.readline() == b""
+

@@ -74,6 +74,10 @@ def receive_messages(sock, responses, stop_event):
                 elif kind == "ADMIN_ANNOUNCEMENT":
                     print(f"\n[Announcement from {message.get('adminId', 'administrator')}] "
                           f"{message.get('message', '')}\n> ", end="", flush=True)
+                elif kind == "ADMIN_MODERATION_NOTICE":
+                    print(f"\n[You were {message.get('action', 'moderated')} by "
+                          f"{message.get('adminId', 'an administrator')}] "
+                          f"{message.get('reason', '')}\n> ", end="", flush=True)
                 elif kind == "FILE_RECEIVE_START":
                     filename = message.get("filename")
                     size = message.get("size")
@@ -137,7 +141,10 @@ def receive_messages(sock, responses, stop_event):
                         end="",
                         flush=True,
                     )
-                elif message.get("type") != "ADMIN_ANNOUNCEMENT":
+                elif message.get("type") not in {
+                    "ADMIN_ANNOUNCEMENT",
+                    "ADMIN_MODERATION_NOTICE",
+                }:
                     responses.put(message)
     except (OSError, ConnectionError, ValueError):
         pass
@@ -441,7 +448,7 @@ def main():
 
     print("\n=== Team 5 TCP Chat ===")
 
-    print("Commands: register, login, msg, announce, history, logout, quit")
+    print("Commands: register, login, msg, announce, kick, ban, history, logout, quit")
 
     try:
 
@@ -591,6 +598,42 @@ def main():
 
                 display_response(response)
 
+            elif command in {"kick", "ban"}:
+
+                if not token:
+
+                    print("Log in first.")
+
+                    continue
+
+                username = input("Username to moderate: ").strip()
+
+                reason = input("Reason (optional): ").strip()
+
+                send_json(sock, send_lock, {
+
+                    "type": "ADMIN_BAN" if command == "ban" else "ADMIN_KICK",
+
+                    "token": token,
+
+                    "username": username,
+
+                    "reason": reason,
+
+                })
+
+                response = wait_for_response(
+
+                    responses,
+
+                    "ADMIN_MODERATION_RESPONSE",
+
+                    stop_event,
+
+                )
+
+                display_response(response)
+
             elif command == "history":
 
                 if not token:
@@ -676,6 +719,7 @@ def main():
                 print(
 
                     "Unknown command. Use register, login, msg, announce, "
+                    "kick, ban, "
 
                     "history, logout, or quit."
 

@@ -128,3 +128,11 @@ An authenticated administrator can use the `announce` client command to send
 a system-wide announcement. Other authenticated users may see the command but
 the server rejects their request. The server sends the announcement to all
 currently connected clients.
+
+## Server-wide moderation
+
+This version does not implement chat rooms, so moderation currently applies to
+the entire server. An administrator can use `kick` to disconnect an online
+user or `ban` to persist a server-wide ban and disconnect that user if online.
+Banned users are refused at their next login, including after the server
+restarts. Both commands accept an optional reason.

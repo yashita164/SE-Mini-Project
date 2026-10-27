@@ -232,6 +232,10 @@ class ChatHandler(socketserver.StreamRequestHandler):
 
             self.handle_admin_broadcast(request)
 
+        elif request_type in {"ADMIN_KICK", "ADMIN_BAN"}:
+
+            self.handle_admin_moderation(request, request_type)
+
         else:
 
             self.reply({
@@ -298,9 +302,30 @@ class ChatHandler(socketserver.StreamRequestHandler):
 
             return
 
+        requested_username = request.get("username")
+
+        if (isinstance(requested_username, str)
+                and database.is_user_banned(requested_username)):
+
+            self.reply({
+
+                "type": "LOGIN_RESPONSE",
+
+                "status": "ERROR",
+
+                "code": 403,
+
+                "message": "This account is banned from the server.",
+
+            })
+
+            self.close_after_request = True
+
+            return
+
         result = auth.login(
 
-            request.get("username"),
+            requested_username,
 
             request.get("password"),
 
@@ -1034,6 +1059,197 @@ class ChatHandler(socketserver.StreamRequestHandler):
             "status": "OK",
 
             "deliveredTo": delivered,
+
+        })
+
+    def handle_admin_moderation(self, request, request_type):
+
+        """Kick a user or persist a server-wide ban, then disconnect them."""
+
+        admin = self.authenticated_username(request)
+
+        if admin is None:
+
+            self.reply({
+
+                "type": "ADMIN_MODERATION_RESPONSE",
+
+                "status": "ERROR",
+
+                "code": 401,
+
+                "message": "Invalid or expired token.",
+
+            })
+
+            return
+
+        if admin not in configured_admins():
+
+            self.reply({
+
+                "type": "ADMIN_MODERATION_RESPONSE",
+
+                "status": "ERROR",
+
+                "code": 403,
+
+                "message": "Administrator privileges are required.",
+
+            })
+
+            return
+
+        target_username = request.get("username")
+
+        if (not isinstance(target_username, str)
+                or not auth.USERNAME_PATTERN.fullmatch(target_username)):
+
+            self.reply({
+
+                "type": "ADMIN_MODERATION_RESPONSE",
+
+                "status": "ERROR",
+
+                "code": 400,
+
+                "message": "A valid username is required.",
+
+            })
+
+            return
+
+        target_user = database.get_user(target_username)
+
+        if target_user is None:
+
+            self.reply({
+
+                "type": "ADMIN_MODERATION_RESPONSE",
+
+                "status": "ERROR",
+
+                "code": 404,
+
+                "message": "User not found.",
+
+            })
+
+            return
+
+        if target_user["username"].casefold() == admin.casefold():
+
+            self.reply({
+
+                "type": "ADMIN_MODERATION_RESPONSE",
+
+                "status": "ERROR",
+
+                "code": 400,
+
+                "message": "An administrator cannot moderate their own account.",
+
+            })
+
+            return
+
+        action = "ban" if request_type == "ADMIN_BAN" else "kick"
+
+        reason = request.get("reason", "")
+
+        if not isinstance(reason, str) or len(reason) > MAX_MESSAGE_LENGTH:
+
+            self.reply({
+
+                "type": "ADMIN_MODERATION_RESPONSE",
+
+                "status": "ERROR",
+
+                "code": 400,
+
+                "message": "The moderation reason is invalid.",
+
+            })
+
+            return
+
+        if action == "ban":
+
+            database.ban_user(target_user["username"], admin)
+
+        with ACTIVE_CLIENTS_LOCK:
+
+            target_connection = ACTIVE_CLIENTS.get(target_user["username"])
+
+        if action == "kick" and target_connection is None:
+
+            self.reply({
+
+                "type": "ADMIN_MODERATION_RESPONSE",
+
+                "status": "ERROR",
+
+                "code": 404,
+
+                "message": "User is not connected.",
+
+            })
+
+            return
+
+        disconnected = False
+
+        if target_connection is not None:
+
+            target_socket, target_send_lock = target_connection
+
+            try:
+
+                send_json(target_socket, target_send_lock, {
+
+                    "type": "ADMIN_MODERATION_NOTICE",
+
+                    "action": action,
+
+                    "adminId": admin,
+
+                    "reason": reason,
+
+                })
+
+            except (OSError, ConnectionError):
+
+                pass
+
+            try:
+
+                target_socket.shutdown(2)
+
+            except OSError:
+
+                pass
+
+            try:
+
+                target_socket.close()
+
+                disconnected = True
+
+            except OSError:
+
+                pass
+
+        self.reply({
+
+            "type": "ADMIN_MODERATION_RESPONSE",
+
+            "status": "OK",
+
+            "action": action,
+
+            "username": target_user["username"],
+
+            "disconnected": disconnected,
 
         })
 
