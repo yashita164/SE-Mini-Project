@@ -52,7 +52,7 @@ The open and fixed defect table will be added after defect triage and resolution
 
 | Defect ID | Summary | Severity | Owner | Status | Related PR / regression test |
 |---|---|---|---|---|---|
-| Pending PRC-04 | Awaiting verified defect information | Pending | Pending | Pending | Pending |
+| No confirmed defects recorded yet | Awaiting defect triage under PRC-04 (#4) | TBD | TBD | Pending triage | Pending |
 
 This placeholder must be replaced with the actual defect information before the report is finalized.
 
