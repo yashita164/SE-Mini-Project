@@ -300,6 +300,26 @@ def wait_for_message_result(
 
             responses.put(message)
 
+def describe_message_result(response):
+    """Turn a SEND_MESSAGE result into the text shown to the sender (CHAT-F-013).
+
+    Only MESSAGE_DELIVERED means the message reached the recipient; a message
+    stored for an offline recipient is never reported as delivered.
+    """
+    if not response:
+        return "No delivery confirmation received."
+    kind = response.get("type")
+    if kind == "MESSAGE_DELIVERED":
+        return f"\u2713 Delivered (message {response.get('messageId', '?')})"
+    if kind == "MESSAGE_STORED":
+        return (f"Saved, not delivered yet: recipient is offline "
+                f"(message {response.get('messageId', '?')})")
+    if kind == "MESSAGE_ERROR":
+        return (f"Message not sent: {response.get('message', 'unknown error')} "
+                f"(code {response.get('code', '?')})")
+    return f"Unexpected response: {kind}"
+
+
 def display_response(message):
 
     """Display a server response without exposing the session token."""
@@ -564,7 +584,7 @@ def main():
 
                 )
 
-                display_response(response)
+                print(describe_message_result(response))
 
             elif command == "announce":
 
