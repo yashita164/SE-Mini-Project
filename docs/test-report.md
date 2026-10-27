@@ -41,7 +41,7 @@ The final report must map each existing test case ID from the Software Test Plan
 | Test case ID | Result | Evidence / remarks |
 |---|---|---|
 | TC-Auth-01 |	Passed |	Registration tests in tests/test_auth.py and tests/test_server.py |
-| TC-Auth-02 |	Passed	Login tests in tests/test_auth.py and tests/test_server.py |
+| TC-Auth-02 |	Passed |	Login tests in tests/test_auth.py and tests/test_server.py |
 | TC-Msg-01	| Passed	| test_private_message_reaches_only_recipient |
 | TC-Msg-03	| Passed	| Database and server offline-message queue tests |
 | TC-Grp-01	| Not Executed — provisional	| No matching test identified in reviewed files |
@@ -51,7 +51,7 @@ The final report must map each existing test case ID from the Software Test Plan
 | TC-Scale-01 |	Not Executed — provisional	| No matching test identified in reviewed files |
 | TC-Rel-01 | Not Executed — provisional	| No matching test identified in reviewed files |
 | TC-Sec-01	| Not Executed — provisional	| No matching test identified in reviewed files |
-| TC-Sec-02 |	Passed| Password hashing and storage tests |
+| TC-Sec-02 |	Passed | Password hashing and storage tests |
  
 Test cases that were not executed must be listed explicitly as **Not Executed**. Do not interpret the total of 37 passing tests as proof that every STP test case passed.
 
