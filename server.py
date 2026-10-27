@@ -1034,6 +1034,10 @@ class ChatHandler(socketserver.StreamRequestHandler):
 
         }
 
+        database.log_admin_action(
+            "broadcast", username, detail=message.strip()
+        )
+
         with ACTIVE_CLIENTS_LOCK:
 
             active_clients = list(ACTIVE_CLIENTS.values())
@@ -1196,6 +1200,10 @@ class ChatHandler(socketserver.StreamRequestHandler):
             })
 
             return
+
+        database.log_admin_action(
+            action, admin, target=target_user["username"], detail=reason
+        )
 
         disconnected = False
 

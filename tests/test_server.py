@@ -6,6 +6,7 @@ import socket
 
 import threading
 import time
+from datetime import datetime
 
 import pytest
 
@@ -1071,4 +1072,62 @@ def test_tc_admin_02_ban_disconnects_and_refuses_later_login(
         assert response["status"] == "ERROR"
         assert response["code"] == 403
         assert banned_user.stream.readline() == b""
+
+
+def test_tc_admin_03_admin_actions_are_audited_with_actor_and_timestamp(
+    running_server, monkeypatch
+):
+    """Broadcast, kick, and ban actions retain their admin and timestamp."""
+    monkeypatch.setenv("CHAT_ADMIN_USERS", "audit_admin")
+
+    with (
+        ChatTestClient(running_server) as admin,
+        ChatTestClient(running_server) as kick_target,
+        ChatTestClient(running_server) as ban_target,
+    ):
+        register_and_login(admin, "audit_admin")
+        register_and_login(kick_target, "audit_kick_target")
+        register_and_login(ban_target, "audit_ban_target")
+
+        admin.send({
+            "type": "ADMIN_BROADCAST",
+            "token": admin.token,
+            "message": "Audit test announcement",
+        })
+        for client in (admin, kick_target, ban_target):
+            assert client.receive()["type"] == "ADMIN_ANNOUNCEMENT"
+        assert admin.receive()["status"] == "OK"
+
+        admin.send({
+            "type": "ADMIN_KICK",
+            "token": admin.token,
+            "username": "audit_kick_target",
+            "reason": "Audit test kick",
+        })
+        assert admin.receive()["status"] == "OK"
+        assert kick_target.receive()["type"] == "ADMIN_MODERATION_NOTICE"
+        assert kick_target.stream.readline() == b""
+
+        admin.send({
+            "type": "ADMIN_BAN",
+            "token": admin.token,
+            "username": "audit_ban_target",
+            "reason": "Audit test ban",
+        })
+        assert admin.receive()["status"] == "OK"
+        assert ban_target.receive()["type"] == "ADMIN_MODERATION_NOTICE"
+        assert ban_target.stream.readline() == b""
+
+    entries = database.get_admin_audit_log()
+    assert [entry["action"] for entry in entries] == ["broadcast", "kick", "ban"]
+    assert all(entry["admin_id"] == "audit_admin" for entry in entries)
+    assert [entry["target"] for entry in entries] == [
+        None, "audit_kick_target", "audit_ban_target"
+    ]
+    assert [entry["detail"] for entry in entries] == [
+        "Audit test announcement", "Audit test kick", "Audit test ban"
+    ]
+    for entry in entries:
+        assert entry["timestamp"].endswith("Z")
+        datetime.fromisoformat(entry["timestamp"].replace("Z", "+00:00"))
 
