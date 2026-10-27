@@ -9,6 +9,7 @@ Development configuration: localhost, port 5000, no TLS.
 import base64
 import hashlib
 import json
+import os
 
 import socketserver
 
@@ -69,6 +70,17 @@ def send_json(client_socket, send_lock, payload):
     with send_lock:
 
         client_socket.sendall(encoded)
+
+
+def configured_admins():
+
+    """Return the exact usernames configured as server administrators."""
+
+    return {
+        username.strip()
+        for username in os.environ.get("CHAT_ADMIN_USERS", "").split(",")
+        if username.strip()
+    }
 
 class ChatHandler(socketserver.StreamRequestHandler):
 
@@ -215,6 +227,10 @@ class ChatHandler(socketserver.StreamRequestHandler):
         elif request_type == "FILE_CHUNK":
 
             self.handle_file_chunk(request)
+
+        elif request_type == "ADMIN_BROADCAST":
+
+            self.handle_admin_broadcast(request)
 
         else:
 
@@ -906,6 +922,118 @@ class ChatHandler(socketserver.StreamRequestHandler):
             "type": "HISTORY_RESPONSE",
 
             "messages": messages,
+
+        })
+
+    def handle_admin_broadcast(self, request):
+
+        """Send an administrator announcement to every connected client."""
+
+        username = self.authenticated_username(request)
+
+        if username is None:
+
+            self.reply({
+
+                "type": "ADMIN_BROADCAST_RESPONSE",
+
+                "status": "ERROR",
+
+                "code": 401,
+
+                "message": "Invalid or expired token.",
+
+            })
+
+            return
+
+        if username not in configured_admins():
+
+            self.reply({
+
+                "type": "ADMIN_BROADCAST_RESPONSE",
+
+                "status": "ERROR",
+
+                "code": 403,
+
+                "message": "Administrator privileges are required.",
+
+            })
+
+            return
+
+        message = request.get("message")
+
+        if not isinstance(message, str) or not message.strip():
+
+            self.reply({
+
+                "type": "ADMIN_BROADCAST_RESPONSE",
+
+                "status": "ERROR",
+
+                "code": 400,
+
+                "message": "A non-empty announcement is required.",
+
+            })
+
+            return
+
+        if len(message) > MAX_MESSAGE_LENGTH:
+
+            self.reply({
+
+                "type": "ADMIN_BROADCAST_RESPONSE",
+
+                "status": "ERROR",
+
+                "code": 413,
+
+                "message": f"Announcement exceeds {MAX_MESSAGE_LENGTH} characters.",
+
+            })
+
+            return
+
+        announcement = {
+
+            "type": "ADMIN_ANNOUNCEMENT",
+
+            "adminId": username,
+
+            "message": message.strip(),
+
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+
+        }
+
+        with ACTIVE_CLIENTS_LOCK:
+
+            active_clients = list(ACTIVE_CLIENTS.values())
+
+        delivered = 0
+
+        for client_socket, send_lock in active_clients:
+
+            try:
+
+                send_json(client_socket, send_lock, announcement)
+
+                delivered += 1
+
+            except (OSError, ConnectionError):
+
+                continue
+
+        self.reply({
+
+            "type": "ADMIN_BROADCAST_RESPONSE",
+
+            "status": "OK",
+
+            "deliveredTo": delivered,
 
         })
 

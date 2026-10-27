@@ -111,3 +111,20 @@ python -m pytest -v
 
 GitHub Actions runs this same command on every push and pull request using
 Python 3.13.
+
+## Administrator announcements
+
+Administrators are identified by their exact registered usernames in the
+server's `CHAT_ADMIN_USERS` environment variable. Set one or more comma-separated
+usernames before starting the server; an empty or unset value grants no
+administrator privileges. For example, in PowerShell:
+
+```powershell
+$env:CHAT_ADMIN_USERS = "site_admin,moderator1"
+python server.py
+```
+
+An authenticated administrator can use the `announce` client command to send
+a system-wide announcement. Other authenticated users may see the command but
+the server rejects their request. The server sends the announcement to all
+currently connected clients.

@@ -71,6 +71,9 @@ def receive_messages(sock, responses, stop_event):
                 if kind == "NEW_MESSAGE":
                     print(f"\n[Private message from {message.get('fromUser', 'unknown')}] "
                           f"{message.get('content', '')}\n> ", end="", flush=True)
+                elif kind == "ADMIN_ANNOUNCEMENT":
+                    print(f"\n[Announcement from {message.get('adminId', 'administrator')}] "
+                          f"{message.get('message', '')}\n> ", end="", flush=True)
                 elif kind == "FILE_RECEIVE_START":
                     filename = message.get("filename")
                     size = message.get("size")
@@ -134,7 +137,7 @@ def receive_messages(sock, responses, stop_event):
                         end="",
                         flush=True,
                     )
-                else:
+                elif message.get("type") != "ADMIN_ANNOUNCEMENT":
                     responses.put(message)
     except (OSError, ConnectionError, ValueError):
         pass
@@ -438,7 +441,7 @@ def main():
 
     print("\n=== Team 5 TCP Chat ===")
 
-    print("Commands: register, login, msg, file, history, logout, quit")
+    print("Commands: register, login, msg, announce, history, logout, quit")
 
     try:
 
@@ -556,6 +559,38 @@ def main():
 
                 display_response(response)
 
+            elif command == "announce":
+
+                if not token:
+
+                    print("Log in first.")
+
+                    continue
+
+                content = input("Announcement: ").strip()
+
+                send_json(sock, send_lock, {
+
+                    "type": "ADMIN_BROADCAST",
+
+                    "token": token,
+
+                    "message": content,
+
+                })
+
+                response = wait_for_response(
+
+                    responses,
+
+                    "ADMIN_BROADCAST_RESPONSE",
+
+                    stop_event,
+
+                )
+
+                display_response(response)
+
             elif command == "history":
 
                 if not token:
@@ -640,7 +675,7 @@ def main():
 
                 print(
 
-                    "Unknown command. Use register, login, msg, "
+                    "Unknown command. Use register, login, msg, announce, "
 
                     "history, logout, or quit."
 
