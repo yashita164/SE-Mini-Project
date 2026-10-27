@@ -31,6 +31,10 @@ def register(username, password):
     if not 8 <= len(password_bytes) <= MAX_BCRYPT_PASSWORD_BYTES:
         return False, "Password must be 8-72 UTF-8 bytes."
 
+    # bcrypt treats NUL as end-of-string, silently ignoring the rest of the password.
+    if b"\x00" in password_bytes:
+        return False, "Password must not contain NUL characters."
+
     password_hash = bcrypt.hashpw(
         password_bytes,
         bcrypt.gensalt(),
