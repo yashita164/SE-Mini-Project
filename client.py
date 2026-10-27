@@ -68,9 +68,8 @@ def receive_messages(sock, responses, stop_event):
 
                 kind = message.get("type")
                 transfer_id = message.get("transferId")
-                if kind == "NEW_MESSAGE":
-                    print(f"\n[Private message from {message.get('fromUser', 'unknown')}] "
-                          f"{message.get('content', '')}\n> ", end="", flush=True)
+                if kind in ("NEW_MESSAGE", "ROOM_EVENT"):
+                    print(f"\n{format_incoming(message)}\n> ", end="", flush=True)
                 elif kind == "FILE_RECEIVE_START":
                     filename = message.get("filename")
                     size = message.get("size")
@@ -120,21 +119,7 @@ def receive_messages(sock, responses, stop_event):
                               f"({len(data)} bytes; SHA-256 verified)\n> ", end="", flush=True)
                     except OSError as error:
                         print(f"\n[Could not save received file: {error}]\n> ", end="", flush=True)
-                if message.get("type") == "NEW_MESSAGE":
-                    offline_note = (
-                        " (received while you were offline)"
-                        if message.get("queued")
-                        else ""
-                    )
-                    print(
-                        f"\n[Private message from "
-                        f"{message.get('fromUser', 'unknown')}"
-                        f"{offline_note}] "
-                        f"{message.get('content', '')}\n> ",
-                        end="",
-                        flush=True,
-                    )
-                else:
+                if kind not in ("NEW_MESSAGE", "ROOM_EVENT"):
                     responses.put(message)
     except (OSError, ConnectionError, ValueError):
         pass
@@ -310,6 +295,68 @@ def describe_message_result(response):
     return f"Unexpected response: {kind}"
 
 
+def format_incoming(message):
+    """Text for a pushed NEW_MESSAGE (private or room) or ROOM_EVENT."""
+    if message.get("type") == "ROOM_EVENT":
+        verb = "joined" if message.get("event") == "JOINED" else "left"
+        return f"[Room {message.get('room', '?')}] {message.get('user', '?')} {verb}"
+    sender = message.get("fromUser", "unknown")
+    content = message.get("content", "")
+    if message.get("roomId"):
+        return f"[Room {message['roomId']}] {sender}: {content}"
+    note = " (received while you were offline)" if message.get("queued") else ""
+    return f"[Private message from {sender}{note}] {content}"
+
+
+def describe_room_response(response):
+    """Friendly text for room/user-list replies (CHAT-F-020..023)."""
+    if not response:
+        return "No response received from the server."
+    kind = response.get("type")
+    if kind == "ROOM_LIST":
+        rooms = response.get("rooms", [])
+        if not rooms:
+            return "No rooms yet. Use create to make one."
+        return "Rooms:\n" + "\n".join(
+            f"  {r['name']} ({r['memberCount']} members)" for r in rooms)
+    if kind == "USER_LIST":
+        scope = f"in room {response['room']}" if response.get("room") else "online"
+        users = response.get("users", [])
+        return f"Users {scope}: " + (", ".join(users) if users else "(none)")
+    if kind == "ROOM_RESPONSE" and response.get("status") == "OK":
+        action = {"CREATE": "Created", "JOIN": "Joined", "LEAVE": "Left"}.get(
+            response.get("action"), "Done:")
+        members = response.get("members")
+        extra = f" (members: {', '.join(members)})" if members else ""
+        return f"{action} room {response.get('room', '?')}{extra}"
+    if kind == "ROOM_RESPONSE":
+        return f"Room request failed: {response.get('message', 'unknown error')} (code {response.get('code', '?')})"
+    return f"Unexpected response: {kind}"
+
+
+def wait_for_types(responses, stop_event, expected_types, timeout=10):
+    """Wait for any one of several response types, keeping unrelated ones."""
+    deferred = []
+    deadline = time.monotonic() + timeout
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            try:
+                message = responses.get(timeout=remaining)
+            except queue.Empty:
+                return None
+            if message.get("type") in expected_types:
+                return message
+            deferred.append(message)
+            if stop_event.is_set() and responses.empty():
+                return None
+    finally:
+        for message in deferred:
+            responses.put(message)
+
+
 def display_response(message):
 
     """Display a server response without exposing the session token."""
@@ -460,6 +507,8 @@ def main():
 
     print("Commands: register, login, msg, file, history, logout, quit")
 
+    print("Rooms: create, join, leave, rooms, users, room")
+
     try:
 
         while not stop_event.is_set():
@@ -575,6 +624,45 @@ def main():
                 )
 
                 print(describe_message_result(response))
+
+            elif command in ("rooms", "users", "create", "join", "leave", "room"):
+
+                if not token:
+
+                    print("Log in first.")
+
+                    continue
+
+                if command == "rooms":
+                    payload, expected = {"type": "LIST_ROOMS"}, {"ROOM_LIST", "ROOM_RESPONSE"}
+                elif command == "users":
+                    payload, expected = {"type": "LIST_USERS"}, {"USER_LIST", "ROOM_RESPONSE"}
+                    room = input("Room (blank for everyone online): ").strip()
+                    if room:
+                        payload["room"] = room
+                elif command == "room":
+                    room = input("Room: ").strip()
+                    content = input("Message: ")
+                    send_json(sock, send_lock, {
+                        "type": "SEND_MESSAGE", "token": token,
+                        "roomId": room, "content": content,
+                    })
+                    print(describe_message_result(
+                        wait_for_message_result(responses, stop_event, timeout=10)))
+                    continue
+                else:
+                    room = input("Room name: ").strip()
+                    payload = {
+                        "type": {"create": "CREATE_ROOM", "join": "JOIN_ROOM",
+                                 "leave": "LEAVE_ROOM"}[command],
+                        "room": room,
+                    }
+                    expected = {"ROOM_RESPONSE"}
+
+                payload["token"] = token
+                send_json(sock, send_lock, payload)
+                print(describe_room_response(
+                    wait_for_types(responses, stop_event, expected)))
 
             elif command == "history":
 
