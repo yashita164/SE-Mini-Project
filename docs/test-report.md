@@ -12,15 +12,15 @@ This report documents the automated tests executed for the chat application, the
 
 | Item | Details |
 |---|---|
-| Test framework | pytest |
+| Test framework | pytest 9.1.0|
 | Test command | `python -m pytest -v` |
 | Tests collected | 37 |
 | Tests passed | 37 |
 | Tests failed | 0 |
-| Tests skipped | Not confirmed in the available CI output |
-| Execution date | To be verified from the CI run |
-| Environment | To be recorded from the CI workflow |
-| CI run URL | To be added |
+| Tests skipped | 0 |
+| Execution date | 27 October 2026 |
+| Environment | GitHub Actions, Linux, Python 3.13.16 |
+| CI run URL | 	[Successful test job](https://github.com/yashita164/SE-Mini-Project/actions/runs/40428045153/job/121938635409?pr=48&utm_source=chatgpt.com) |
 
 **Summary:** The available CI output reports that all 37 collected tests passed. This result applies to the tests executed in that CI run and does not, by itself, establish that every requirement or planned test case has been covered.
 
