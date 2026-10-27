@@ -43,6 +43,14 @@ def init_db():
                     REFERENCES users(username) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS banned_users (
+                username TEXT PRIMARY KEY COLLATE NOCASE,
+                banned_by TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (username)
+                    REFERENCES users(username) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 sender TEXT NOT NULL,
@@ -126,6 +134,27 @@ def delete_session(token):
             "DELETE FROM sessions WHERE token = ?",
             (token,),
         )
+
+
+def ban_user(username, banned_by):
+    """Persist a server-wide ban for an existing username."""
+    with get_connection() as connection:
+        connection.execute(
+            "INSERT OR REPLACE INTO banned_users (username, banned_by) "
+            "VALUES (?, ?)",
+            (username, banned_by),
+        )
+
+
+def is_user_banned(username):
+    """Return whether the username has an active server-wide ban."""
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT 1 FROM banned_users WHERE username = ?",
+            (username,),
+        ).fetchone()
+
+    return row is not None
 
 
 def save_message(sender, recipient, content, delivered=False):
