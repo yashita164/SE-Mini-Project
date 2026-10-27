@@ -43,6 +43,23 @@ def init_db():
                     REFERENCES users(username) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS banned_users (
+                username TEXT PRIMARY KEY COLLATE NOCASE,
+                banned_by TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (username)
+                    REFERENCES users(username) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS admin_audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action TEXT NOT NULL,
+                admin_id TEXT NOT NULL,
+                target TEXT,
+                detail TEXT NOT NULL DEFAULT '',
+                timestamp TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 sender TEXT NOT NULL,
@@ -126,6 +143,59 @@ def delete_session(token):
             "DELETE FROM sessions WHERE token = ?",
             (token,),
         )
+
+
+def ban_user(username, banned_by):
+    """Persist a server-wide ban for an existing username."""
+    with get_connection() as connection:
+        connection.execute(
+            "INSERT OR REPLACE INTO banned_users (username, banned_by) "
+            "VALUES (?, ?)",
+            (username, banned_by),
+        )
+
+
+def is_user_banned(username):
+    """Return whether the username has an active server-wide ban."""
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT 1 FROM banned_users WHERE username = ?",
+            (username,),
+        ).fetchone()
+
+    return row is not None
+
+
+def log_admin_action(action, admin_id, target=None, detail=''):
+    """Persist one successful administrative action with its actor and time."""
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO admin_audit_log (action, admin_id, target, detail)
+            VALUES (?, ?, ?, ?)
+            """,
+            (action, admin_id, target, detail),
+        )
+        return cursor.lastrowid
+
+
+def get_admin_audit_log(limit=100):
+    """Return recent administrative audit entries in chronological order."""
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        raise ValueError("limit must be a positive integer")
+
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT id, action, admin_id, target, detail, timestamp
+            FROM admin_audit_log
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+    return [dict(row) for row in reversed(rows)]
 
 
 def save_message(sender, recipient, content, delivered=False):

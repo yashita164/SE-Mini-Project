@@ -6,6 +6,7 @@ import socket
 
 import threading
 import time
+from datetime import datetime
 
 import pytest
 
@@ -479,9 +480,14 @@ def test_offline_message_is_stored(running_server):
 
         )
 
-def test_unauthenticated_message_is_rejected(running_server):
+@pytest.mark.parametrize(
+    "token",
+    [None, "invalid-token"],
+    ids=["missing-token", "invalid-token"],
+)
+def test_unauthenticated_message_is_rejected(running_server, token):
 
-    """Sending a message without authentication is rejected."""
+    """Sending a message without a valid session is rejected."""
 
     with ChatTestClient(running_server) as client:
 
@@ -489,17 +495,21 @@ def test_unauthenticated_message_is_rejected(running_server):
 
         assert registration["status"] == "OK"
 
-        client.send({
+        request = {
 
             "type": "SEND_MESSAGE",
-
-            "token": "invalid-token",
 
             "toUser": "someone",
 
             "content": "This should be rejected",
 
-        })
+        }
+
+        if token is not None:
+
+            request["token"] = token
+
+        client.send(request)
 
         response = client.receive()
 
@@ -507,24 +517,63 @@ def test_unauthenticated_message_is_rejected(running_server):
 
         assert response["code"] == 401
 
-def test_history_requires_authentication(running_server):
+@pytest.mark.parametrize(
+    "token",
+    [None, "invalid-token"],
+    ids=["missing-token", "invalid-token"],
+)
+def test_history_requires_authentication(running_server, token):
 
     """History requests require a valid session."""
 
     with ChatTestClient(running_server) as client:
 
-        client.send({
+        request = {
 
             "type": "HISTORY_REQUEST",
 
-            "token": "invalid-token",
+        }
 
-        })
+        if token is not None:
+
+            request["token"] = token
+
+        client.send(request)
 
         response = client.receive()
 
         assert response["type"] == "ERROR"
 
+        assert response["code"] == 401
+
+
+@pytest.mark.parametrize(
+    "request_type,response_type",
+    [
+        ("TYPING", "TYPING_RESPONSE"),
+        ("FILE_START", "FILE_ERROR"),
+        ("FILE_CHUNK", "FILE_ERROR"),
+        ("LOGOUT_REQUEST", "ERROR"),
+    ],
+)
+@pytest.mark.parametrize(
+    "token",
+    [None, "invalid-token"],
+    ids=["missing-token", "invalid-token"],
+)
+def test_session_token_is_required_for_protected_requests(
+    running_server, request_type, response_type, token
+):
+    """Every remaining authenticated operation rejects absent or bad tokens."""
+    with ChatTestClient(running_server) as client:
+        request = {"type": request_type}
+        if token is not None:
+            request["token"] = token
+
+        client.send(request)
+        response = client.receive()
+
+        assert response["type"] == response_type
         assert response["code"] == 401
 
 def test_malformed_json_returns_error_and_connection_recovers(
@@ -883,4 +932,202 @@ def test_sec_02_no_plaintext_password_in_server_logs(
     for secret in (good_password, wrong_password):
         assert secret not in output
         assert secret not in log_text
+
+
+def test_tc_admin_01_announcement_reaches_all_active_clients_within_latency(
+    running_server, monkeypatch
+):
+    """Configured admins can broadcast an announcement to every online user."""
+    monkeypatch.setenv("CHAT_ADMIN_USERS", "site_admin")
+
+    with (
+        ChatTestClient(running_server) as admin,
+        ChatTestClient(running_server) as alice,
+        ChatTestClient(running_server) as bob,
+    ):
+        register_and_login(admin, "site_admin")
+        register_and_login(alice, "announcement_alice")
+        register_and_login(bob, "announcement_bob")
+
+        started = time.perf_counter()
+        admin.send({
+            "type": "ADMIN_BROADCAST",
+            "token": admin.token,
+            "message": "Scheduled maintenance at 18:00 UTC",
+        })
+
+        announcements = [
+            client.receive(timeout=0.5)
+            for client in (admin, alice, bob)
+        ]
+        latency_ms = (time.perf_counter() - started) * 1000
+
+        for announcement in announcements:
+            assert announcement["type"] == "ADMIN_ANNOUNCEMENT"
+            assert announcement["adminId"] == "site_admin"
+            assert announcement["message"] == "Scheduled maintenance at 18:00 UTC"
+            assert announcement["timestamp"]
+
+        response = admin.receive(timeout=0.5)
+        assert response["type"] == "ADMIN_BROADCAST_RESPONSE"
+        assert response["status"] == "OK"
+        assert response["deliveredTo"] == 3
+        assert latency_ms < 500
+
+
+def test_tc_admin_01_non_admin_cannot_broadcast(running_server, monkeypatch):
+    """Only usernames in the server administrator allowlist may broadcast."""
+    monkeypatch.setenv("CHAT_ADMIN_USERS", "site_admin")
+
+    with (
+        ChatTestClient(running_server) as alice,
+        ChatTestClient(running_server) as bob,
+    ):
+        register_and_login(alice, "ordinary_alice")
+        register_and_login(bob, "ordinary_bob")
+
+        alice.send({
+            "type": "ADMIN_BROADCAST",
+            "token": alice.token,
+            "message": "Unauthorized announcement",
+        })
+
+        response = alice.receive()
+        assert response["type"] == "ADMIN_BROADCAST_RESPONSE"
+        assert response["status"] == "ERROR"
+        assert response["code"] == 403
+        expect_no_message(bob.sock, bob.stream)
+
+
+def test_tc_admin_02_kick_closes_target_socket(running_server, monkeypatch):
+    """An administrator kick notifies and disconnects an online user."""
+    monkeypatch.setenv("CHAT_ADMIN_USERS", "moderation_admin")
+
+    with (
+        ChatTestClient(running_server) as admin,
+        ChatTestClient(running_server) as target,
+    ):
+        register_and_login(admin, "moderation_admin")
+        register_and_login(target, "kick_target")
+
+        admin.send({
+            "type": "ADMIN_KICK",
+            "token": admin.token,
+            "username": "kick_target",
+            "reason": "Testing moderator kick",
+        })
+
+        response = admin.receive()
+        assert response["type"] == "ADMIN_MODERATION_RESPONSE"
+        assert response["status"] == "OK"
+        assert response["action"] == "kick"
+        assert response["username"] == "kick_target"
+        assert response["disconnected"] is True
+
+        notice = target.receive()
+        assert notice["type"] == "ADMIN_MODERATION_NOTICE"
+        assert notice["action"] == "kick"
+        assert notice["adminId"] == "moderation_admin"
+        assert target.stream.readline() == b""
+
+
+def test_tc_admin_02_ban_disconnects_and_refuses_later_login(
+    running_server, monkeypatch
+):
+    """A ban disconnects the user and remains enforced at their next login."""
+    monkeypatch.setenv("CHAT_ADMIN_USERS", "moderation_admin")
+
+    with (
+        ChatTestClient(running_server) as admin,
+        ChatTestClient(running_server) as target,
+    ):
+        register_and_login(admin, "moderation_admin")
+        register_and_login(target, "ban_target")
+
+        admin.send({
+            "type": "ADMIN_BAN",
+            "token": admin.token,
+            "username": "ban_target",
+            "reason": "Repeated abuse",
+        })
+
+        response = admin.receive()
+        assert response["type"] == "ADMIN_MODERATION_RESPONSE"
+        assert response["status"] == "OK"
+        assert response["action"] == "ban"
+        assert response["username"] == "ban_target"
+        assert response["disconnected"] is True
+
+        notice = target.receive()
+        assert notice["type"] == "ADMIN_MODERATION_NOTICE"
+        assert notice["action"] == "ban"
+        assert notice["adminId"] == "moderation_admin"
+        assert target.stream.readline() == b""
+
+        assert database.is_user_banned("ban_target")
+
+    with ChatTestClient(running_server) as banned_user:
+        response = banned_user.login("ban_target")
+        assert response["type"] == "LOGIN_RESPONSE"
+        assert response["status"] == "ERROR"
+        assert response["code"] == 403
+        assert banned_user.stream.readline() == b""
+
+
+def test_tc_admin_03_admin_actions_are_audited_with_actor_and_timestamp(
+    running_server, monkeypatch
+):
+    """Broadcast, kick, and ban actions retain their admin and timestamp."""
+    monkeypatch.setenv("CHAT_ADMIN_USERS", "audit_admin")
+
+    with (
+        ChatTestClient(running_server) as admin,
+        ChatTestClient(running_server) as kick_target,
+        ChatTestClient(running_server) as ban_target,
+    ):
+        register_and_login(admin, "audit_admin")
+        register_and_login(kick_target, "audit_kick_target")
+        register_and_login(ban_target, "audit_ban_target")
+
+        admin.send({
+            "type": "ADMIN_BROADCAST",
+            "token": admin.token,
+            "message": "Audit test announcement",
+        })
+        for client in (admin, kick_target, ban_target):
+            assert client.receive()["type"] == "ADMIN_ANNOUNCEMENT"
+        assert admin.receive()["status"] == "OK"
+
+        admin.send({
+            "type": "ADMIN_KICK",
+            "token": admin.token,
+            "username": "audit_kick_target",
+            "reason": "Audit test kick",
+        })
+        assert admin.receive()["status"] == "OK"
+        assert kick_target.receive()["type"] == "ADMIN_MODERATION_NOTICE"
+        assert kick_target.stream.readline() == b""
+
+        admin.send({
+            "type": "ADMIN_BAN",
+            "token": admin.token,
+            "username": "audit_ban_target",
+            "reason": "Audit test ban",
+        })
+        assert admin.receive()["status"] == "OK"
+        assert ban_target.receive()["type"] == "ADMIN_MODERATION_NOTICE"
+        assert ban_target.stream.readline() == b""
+
+    entries = database.get_admin_audit_log()
+    assert [entry["action"] for entry in entries] == ["broadcast", "kick", "ban"]
+    assert all(entry["admin_id"] == "audit_admin" for entry in entries)
+    assert [entry["target"] for entry in entries] == [
+        None, "audit_kick_target", "audit_ban_target"
+    ]
+    assert [entry["detail"] for entry in entries] == [
+        "Audit test announcement", "Audit test kick", "Audit test ban"
+    ]
+    for entry in entries:
+        assert entry["timestamp"].endswith("Z")
+        datetime.fromisoformat(entry["timestamp"].replace("Z", "+00:00"))
 
