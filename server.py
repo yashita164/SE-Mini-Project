@@ -9,6 +9,9 @@ Development configuration: localhost, port 5000, no TLS.
 import base64
 import hashlib
 import json
+import sys
+import traceback
+import unicodedata
 
 import socketserver
 
@@ -24,6 +27,9 @@ HOST = "127.0.0.1"
 
 PORT = 5000
 
+# Payload limits (CHAT-SR-003). The SRS does not state a maximum, so these are
+# the documented defaults: one JSON request line may be at most 16 KiB and a
+# chat message at most 4,000 characters. Larger input is rejected with 413.
 MAX_REQUEST_BYTES = 16_384
 
 MAX_MESSAGE_LENGTH = 4_000
@@ -69,6 +75,19 @@ def send_json(client_socket, send_lock, payload):
     with send_lock:
 
         client_socket.sendall(encoded)
+
+def has_control_chars(text, allowed=""):
+    """True if text contains control characters other than those in `allowed`."""
+    return any(
+        unicodedata.category(ch) == "Cc" and ch not in allowed for ch in text
+    )
+
+
+def log_unexpected_error(client_address):
+    """Log a handler failure server-side only; clients get a generic 500."""
+    print(f"[ERROR] Unhandled exception for {client_address}", file=sys.stderr)
+    traceback.print_exc()
+
 
 class ChatHandler(socketserver.StreamRequestHandler):
 
@@ -122,7 +141,8 @@ class ChatHandler(socketserver.StreamRequestHandler):
 
                         raise ValueError("Expected a JSON object")
 
-                except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
+                except (json.JSONDecodeError, UnicodeDecodeError, ValueError,
+                        RecursionError):
 
                     self.reply({
 
@@ -144,7 +164,13 @@ class ChatHandler(socketserver.StreamRequestHandler):
 
                         break
 
-                except (OSError, RuntimeError):
+                except Exception:
+
+                    # Any unexpected failure while handling one request must not
+                    # kill this connection's thread or leak internals (SR-003).
+
+                    log_unexpected_error(self.client_address)
+
 
                     self.reply({
 
@@ -621,6 +647,21 @@ class ChatHandler(socketserver.StreamRequestHandler):
 
             return
 
+        if (has_control_chars(content, allowed="\n\r\t")
+                or has_control_chars(recipient)):
+
+            self.reply({
+
+                "type": "MESSAGE_ERROR",
+
+                "code": 400,
+
+                "message": "Message contains unsupported control characters.",
+
+            })
+
+            return
+
         recipient_user = database.get_user(recipient)
 
         if recipient_user is None:
@@ -690,7 +731,8 @@ class ChatHandler(socketserver.StreamRequestHandler):
                         "message": "Recipient is required."})
             return
         if (not isinstance(filename, str) or not filename.strip()
-                or filename in {".", ".."} or "/" in filename or "\\" in filename):
+                or filename in {".", ".."} or "/" in filename or "\\" in filename
+                or has_control_chars(filename)):
             self.reply({"type": "FILE_ERROR", "code": 400,
                         "message": "Invalid filename."})
             return
@@ -749,7 +791,9 @@ class ChatHandler(socketserver.StreamRequestHandler):
             return
 
         transfer_id = request.get("transferId")
-        transfer = self.file_transfers.get(transfer_id)
+        # transferId comes from the client: only strings are valid dict keys here.
+        transfer = (self.file_transfers.get(transfer_id)
+                    if isinstance(transfer_id, str) else None)
         encoded = request.get("data")
         final = request.get("final")
         if transfer is None or transfer["sender"] != sender:
