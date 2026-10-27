@@ -17,6 +17,8 @@
 | CHAT-F-030 (SRS 4.4): send a file to a user or a room | Files can be sent to one online user only. An offline recipient is rejected and files cannot be sent to a room. | Chunks are relayed straight to the recipient, with no server-side file storage. | No offline or group file sharing. | Not planned |
 | CHAT-F-041 (SRS 4.5): kick or ban a user from a room or the server | Moderation applies to the whole server only. There is no per-room moderation and no mute. | Rooms were added late in Sprint 2. | An administrator cannot remove a user from a single room without removing them from the server. | Not planned |
 | CHAT-NF-004 (SRS 5): history retrievable for at least 90 days | All messages are kept in the database, but the history request returns only the latest 50. | A simple limit keeps the response small. | Older messages are stored but cannot be fetched through the client. | Not planned |
+| CHAT-F-013 (SRS 4.2): the sender's UI shows a "delivered" tick | The console client prints `✓ Delivered` when the server confirms delivery, and `Saved, not delivered yet: recipient is offline` when the message is only stored. | The client is a console application. | The acknowledgement works as specified; there is no graphical tick. | Sprint 2 |
+| CHAT-F-020 to CHAT-F-023 (SRS 4.3): chat rooms and online-user lists | Rooms are kept in memory and are lost when the server restarts. Room messages are saved under the sender only, so history shows them to the sender alone. Rooms have no owner. | Persistent rooms would need extra database tables and were out of time. | Users must recreate rooms after a server restart. | Not planned |
 
 ## 2. Protocol choices the SAD does not fix
 
