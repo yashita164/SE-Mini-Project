@@ -6,7 +6,7 @@
 
 ## Purpose
 
-This matrix maps each SRS requirement to its existing STP test-case ID and records whether corresponding test code was found in the reviewed test files. A test being present does **not** mean it passed. The test suite has not been executed as part of this review, so execution status remains **Not Run (NR)** until a real test run is recorded.
+This matrix maps each SRS requirement to its existing STP test-case ID and records the test code found in the reviewed files. GitHub Actions executed `python -m pytest -v`, collecting and passing 37 tests with no failures. However, a passing test suite does not automatically prove that every requirement is fully covered. Individual RTM assessments must be based on the relevant test assertions and the expected results defined in the STP.
 
 ## Proposed RTM status definitions — pending team agreement
 
@@ -40,7 +40,7 @@ This matrix maps each SRS requirement to its existing STP test-case ID and recor
 | CHAT-F-021 | Join / leave room | TC-Grp-02 | No dedicated test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
 | CHAT-F-022 | Room message broadcast | TC-Grp-03 | No dedicated test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
 | CHAT-F-023 | Display online users | TC-Grp-04 | No dedicated test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
-| CHAT-F-030 | File attachment | TC-File-01 | `test_server.py` contains `test_file_transfer_preserves_bytes_and_checksum`, but the supplied body stops after setup and has no transfer/assertions | NI / incomplete stub — finish the test so it verifies transfer and checksum | Not run; meaningful test incomplete |
+| CHAT-F-030 | File attachment | TC-File-01 | `test_server.py`: `test_file_transfer_preserves_bytes_and_checksum` | Test found; CI test passed. Confirm full coverage against STP expected results. | Executed — passed in the recorded CI run |
 | CHAT-F-031 | Reject oversized files | TC-File-02 | `test_server.py`: oversized file metadata rejected with code 413 | Found | NR — run not verified |
 | CHAT-F-040 | Admin announcement | TC-Admin-01 | No dedicated test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
 | CHAT-F-041 | Kick / ban | TC-Admin-02 | No dedicated test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
@@ -66,7 +66,6 @@ Based on the three reviewed files, these test cases have no dedicated meaningful
 - `TC-Grp-02` — join / leave room
 - `TC-Grp-03` — room message broadcast
 - `TC-Grp-04` — display online users
-- `TC-File-01` — finish the existing incomplete transfer/checksum test
 - `TC-Admin-01` — admin announcement
 - `TC-Admin-02` — kick / ban
 - `TC-Admin-03` — admin action logging
@@ -88,7 +87,7 @@ Additional follow-up / coverage confirmation:
 - [x] Every SRS requirement listed above is mapped to its existing STP test-case ID.
 - [x] Preliminary test-code gaps are listed from the reviewed files.
 - [ ] Team agrees on RTM status definitions and clarifies the existing `N` value.
-- [ ] Run the test suite and record the actual result; do not mark tests `P` or `F` without execution evidence.
+- [x] Run the test suite: GitHub Actions collected 37 tests and all 37 passed.
 - [ ] Link this RTM and the test-gap list in Issue #12.
 - [ ] Submit a pull request referencing Issue #12.
 - [ ] Obtain review from a teammate other than the author.
