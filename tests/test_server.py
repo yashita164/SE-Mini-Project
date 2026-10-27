@@ -479,9 +479,14 @@ def test_offline_message_is_stored(running_server):
 
         )
 
-def test_unauthenticated_message_is_rejected(running_server):
+@pytest.mark.parametrize(
+    "token",
+    [None, "invalid-token"],
+    ids=["missing-token", "invalid-token"],
+)
+def test_unauthenticated_message_is_rejected(running_server, token):
 
-    """Sending a message without authentication is rejected."""
+    """Sending a message without a valid session is rejected."""
 
     with ChatTestClient(running_server) as client:
 
@@ -489,17 +494,21 @@ def test_unauthenticated_message_is_rejected(running_server):
 
         assert registration["status"] == "OK"
 
-        client.send({
+        request = {
 
             "type": "SEND_MESSAGE",
-
-            "token": "invalid-token",
 
             "toUser": "someone",
 
             "content": "This should be rejected",
 
-        })
+        }
+
+        if token is not None:
+
+            request["token"] = token
+
+        client.send(request)
 
         response = client.receive()
 
@@ -507,24 +516,63 @@ def test_unauthenticated_message_is_rejected(running_server):
 
         assert response["code"] == 401
 
-def test_history_requires_authentication(running_server):
+@pytest.mark.parametrize(
+    "token",
+    [None, "invalid-token"],
+    ids=["missing-token", "invalid-token"],
+)
+def test_history_requires_authentication(running_server, token):
 
     """History requests require a valid session."""
 
     with ChatTestClient(running_server) as client:
 
-        client.send({
+        request = {
 
             "type": "HISTORY_REQUEST",
 
-            "token": "invalid-token",
+        }
 
-        })
+        if token is not None:
+
+            request["token"] = token
+
+        client.send(request)
 
         response = client.receive()
 
         assert response["type"] == "ERROR"
 
+        assert response["code"] == 401
+
+
+@pytest.mark.parametrize(
+    "request_type,response_type",
+    [
+        ("TYPING", "TYPING_RESPONSE"),
+        ("FILE_START", "FILE_ERROR"),
+        ("FILE_CHUNK", "FILE_ERROR"),
+        ("LOGOUT_REQUEST", "ERROR"),
+    ],
+)
+@pytest.mark.parametrize(
+    "token",
+    [None, "invalid-token"],
+    ids=["missing-token", "invalid-token"],
+)
+def test_session_token_is_required_for_protected_requests(
+    running_server, request_type, response_type, token
+):
+    """Every remaining authenticated operation rejects absent or bad tokens."""
+    with ChatTestClient(running_server) as client:
+        request = {"type": request_type}
+        if token is not None:
+            request["token"] = token
+
+        client.send(request)
+        response = client.receive()
+
+        assert response["type"] == response_type
         assert response["code"] == 401
 
 def test_malformed_json_returns_error_and_connection_recovers(
