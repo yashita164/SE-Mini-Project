@@ -9,13 +9,12 @@ Development configuration: localhost, port 5000, no TLS.
 import base64
 import hashlib
 import json
+import os
 
+import re
 import sys
 import traceback
 import unicodedata
-
-import os
-
 
 import socketserver
 
@@ -81,6 +80,63 @@ def send_json(client_socket, send_lock, payload):
         client_socket.sendall(encoded)
 
 
+def configured_admins():
+
+    """Return the exact usernames configured as server administrators."""
+
+    return {
+        username.strip()
+        for username in os.environ.get("CHAT_ADMIN_USERS", "").split(",")
+        if username.strip()
+    }
+
+ROOM_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{3,32}$")
+
+# room key (lower-case name) -> {"name": display name, "members": set of usernames}
+# Rooms live in memory only (documented deviation): they reset on server restart.
+ROOMS = {}
+# Lock order rule: never acquire ACTIVE_CLIENTS_LOCK while holding ROOMS_LOCK.
+ROOMS_LOCK = threading.Lock()
+
+
+def send_to_user(username, payload):
+    """Push an event to one online user; return True if it was written."""
+    with ACTIVE_CLIENTS_LOCK:
+        target = ACTIVE_CLIENTS.get(username)
+    if target is None:
+        return False
+    try:
+        send_json(target[0], target[1], payload)
+        return True
+    except (OSError, ConnectionError):
+        return False
+
+
+def broadcast_room_event(room_key, event, user):
+    """Tell every current member of a room that `user` joined or left."""
+    with ROOMS_LOCK:
+        room = ROOMS.get(room_key)
+        if room is None:
+            return
+        name = room["name"]
+        members = sorted(room["members"])
+    for member in members:
+        if member != user:
+            send_to_user(member, {
+                "type": "ROOM_EVENT", "event": event, "room": name,
+                "user": user, "members": members,
+            })
+
+
+def leave_all_rooms(username):
+    """Remove a user from every room; return the keys of rooms they were in."""
+    with ROOMS_LOCK:
+        left = [key for key, room in ROOMS.items() if username in room["members"]]
+        for key in left:
+            ROOMS[key]["members"].discard(username)
+    return left
+
+
 def has_control_chars(text, allowed=""):
     """True if text contains control characters other than those in `allowed`."""
     return any(
@@ -92,18 +148,6 @@ def log_unexpected_error(client_address):
     """Log a handler failure server-side only; clients get a generic 500."""
     print(f"[ERROR] Unhandled exception for {client_address}", file=sys.stderr)
     traceback.print_exc()
-
-
-
-def configured_admins():
-
-    """Return the exact usernames configured as server administrators."""
-
-    return {
-        username.strip()
-        for username in os.environ.get("CHAT_ADMIN_USERS", "").split(",")
-        if username.strip()
-    }
 
 
 class ChatHandler(socketserver.StreamRequestHandler):
@@ -121,6 +165,7 @@ class ChatHandler(socketserver.StreamRequestHandler):
         self.token = None
         self.close_after_request = False
         self.file_transfers = {}
+        self.left_rooms = []
 
     def handle(self):
 
@@ -266,6 +311,26 @@ class ChatHandler(socketserver.StreamRequestHandler):
         elif request_type in {"ADMIN_KICK", "ADMIN_BAN"}:
 
             self.handle_admin_moderation(request, request_type)
+
+        elif request_type == "CREATE_ROOM":
+
+            self.handle_create_room(request)
+
+        elif request_type == "JOIN_ROOM":
+
+            self.handle_join_room(request)
+
+        elif request_type == "LEAVE_ROOM":
+
+            self.handle_leave_room(request)
+
+        elif request_type == "LIST_ROOMS":
+
+            self.handle_list_rooms(request)
+
+        elif request_type == "LIST_USERS":
+
+            self.handle_list_users(request)
 
         else:
 
@@ -647,6 +712,12 @@ class ChatHandler(socketserver.StreamRequestHandler):
 
             return
 
+        if "roomId" in request:
+
+            self.handle_room_message(sender, request)
+
+            return
+
         recipient = request.get("toUser")
 
         content = request.get("content")
@@ -918,6 +989,196 @@ class ChatHandler(socketserver.StreamRequestHandler):
         self.reply({"type": "FILE_SENT", "transferId": transfer_id,
                     "filename": transfer["filename"], "size": len(file_data),
                     "sha256": checksum})
+    def room_reply(self, response_type, status, **fields):
+        self.reply({"type": response_type, "status": status, **fields})
+
+    def room_name_from(self, request, response_type="ROOM_RESPONSE"):
+        """Return (room_key, name) for a valid room name, else reply 400 and None."""
+        name = request.get("room")
+        if not isinstance(name, str) or not ROOM_NAME_PATTERN.fullmatch(name):
+            self.room_reply(
+                response_type, "ERROR", code=400,
+                message="Room name must be 3-32 characters: letters, numbers, _ or -.",
+            )
+            return None
+        return name.lower(), name
+
+    def handle_create_room(self, request):
+        """CHAT-F-020: create a named room; the creator becomes its first member."""
+        user = self.authenticated_username(request)
+        if user is None:
+            self.room_reply("ROOM_RESPONSE", "ERROR", code=401,
+                            message="Invalid or expired token.")
+            return
+        parsed = self.room_name_from(request)
+        if parsed is None:
+            return
+        key, name = parsed
+        with ROOMS_LOCK:
+            exists = key in ROOMS
+            if not exists:
+                ROOMS[key] = {"name": name, "members": {user}}
+        if exists:
+            self.room_reply("ROOM_RESPONSE", "ERROR", code=409,
+                            message="A room with that name already exists.")
+            return
+        self.room_reply("ROOM_RESPONSE", "OK", action="CREATE", room=name,
+                        members=[user])
+
+    def handle_join_room(self, request):
+        """CHAT-F-021: join an existing room."""
+        user = self.authenticated_username(request)
+        if user is None:
+            self.room_reply("ROOM_RESPONSE", "ERROR", code=401,
+                            message="Invalid or expired token.")
+            return
+        parsed = self.room_name_from(request)
+        if parsed is None:
+            return
+        key, _ = parsed
+        code = None
+        with ROOMS_LOCK:
+            room = ROOMS.get(key)
+            if room is None:
+                code, message = 404, "Room not found."
+            elif user in room["members"]:
+                code, message = 409, "You are already in this room."
+            else:
+                room["members"].add(user)
+                name = room["name"]
+                members = sorted(room["members"])
+        if code is not None:
+            self.room_reply("ROOM_RESPONSE", "ERROR", code=code, message=message)
+            return
+        self.room_reply("ROOM_RESPONSE", "OK", action="JOIN", room=name,
+                        members=members)
+        broadcast_room_event(key, "JOINED", user)
+
+    def handle_leave_room(self, request):
+        """CHAT-F-021: leave a room you are in."""
+        user = self.authenticated_username(request)
+        if user is None:
+            self.room_reply("ROOM_RESPONSE", "ERROR", code=401,
+                            message="Invalid or expired token.")
+            return
+        parsed = self.room_name_from(request)
+        if parsed is None:
+            return
+        key, _ = parsed
+        code = None
+        with ROOMS_LOCK:
+            room = ROOMS.get(key)
+            if room is None:
+                code, message = 404, "Room not found."
+            elif user not in room["members"]:
+                code, message = 409, "You are not in this room."
+            else:
+                room["members"].discard(user)
+                name = room["name"]
+        if code is not None:
+            self.room_reply("ROOM_RESPONSE", "ERROR", code=code, message=message)
+            return
+        self.room_reply("ROOM_RESPONSE", "OK", action="LEAVE", room=name)
+        broadcast_room_event(key, "LEFT", user)
+
+    def handle_list_rooms(self, request):
+        """Room directory: every room with its member count."""
+        if self.authenticated_username(request) is None:
+            self.room_reply("ROOM_RESPONSE", "ERROR", code=401,
+                            message="Invalid or expired token.")
+            return
+        with ROOMS_LOCK:
+            rooms = [{"name": r["name"], "memberCount": len(r["members"])}
+                     for r in ROOMS.values()]
+        rooms.sort(key=lambda r: r["name"].lower())
+        self.reply({"type": "ROOM_LIST", "rooms": rooms})
+
+    def handle_list_users(self, request):
+        """CHAT-F-023: online users, globally or for one room you belong to."""
+        user = self.authenticated_username(request)
+        if user is None:
+            self.room_reply("ROOM_RESPONSE", "ERROR", code=401,
+                            message="Invalid or expired token.")
+            return
+        room_field = request.get("room")
+        with ACTIVE_CLIENTS_LOCK:
+            online = set(ACTIVE_CLIENTS)
+        if room_field is None:
+            self.reply({"type": "USER_LIST", "room": None, "users": sorted(online)})
+            return
+        parsed = self.room_name_from(request)
+        if parsed is None:
+            return
+        key, _ = parsed
+        code = None
+        with ROOMS_LOCK:
+            room = ROOMS.get(key)
+            if room is None:
+                code, message = 404, "Room not found."
+            elif user not in room["members"]:
+                code, message = 403, "You are not a member of this room."
+            else:
+                name = room["name"]
+                members = set(room["members"])
+        if code is not None:
+            self.room_reply("ROOM_RESPONSE", "ERROR", code=code, message=message)
+            return
+        self.reply({"type": "USER_LIST", "room": name,
+                    "users": sorted(members & online)})
+
+    def handle_room_message(self, sender, request):
+        """CHAT-F-022: broadcast a message to every online member of a room."""
+        room_id = request.get("roomId")
+        content = request.get("content")
+        if not isinstance(room_id, str) or not ROOM_NAME_PATTERN.fullmatch(room_id):
+            self.reply({"type": "MESSAGE_ERROR", "code": 400,
+                        "message": "A valid room name is required."})
+            return
+        if not isinstance(content, str) or not content.strip():
+            self.reply({"type": "MESSAGE_ERROR", "code": 400,
+                        "message": "Message content cannot be empty."})
+            return
+        if len(content) > MAX_MESSAGE_LENGTH:
+            self.reply({"type": "MESSAGE_ERROR", "code": 413,
+                        "message": "Message exceeds the allowed length."})
+            return
+        if has_control_chars(content, allowed="\n\r\t"):
+            self.reply({"type": "MESSAGE_ERROR", "code": 400,
+                        "message": "Message contains unsupported control characters."})
+            return
+        with ROOMS_LOCK:
+            room = ROOMS.get(room_id.lower())
+            if room is None:
+                code, message = 404, "Room not found."
+            elif sender not in room["members"]:
+                code, message = 403, "You are not a member of this room."
+            else:
+                code = None
+                name = room["name"]
+                recipients = sorted(room["members"] - {sender})
+        if code is not None:
+            self.reply({"type": "MESSAGE_ERROR", "code": code, "message": message})
+            return
+        # Stored under "#<room>" (usernames cannot contain '#'), already delivered
+        # so it is never replayed from the offline queue.
+        message_id = database.save_message(sender, "#" + name, content, delivered=True)
+        timestamp = datetime.now(timezone.utc).isoformat()
+        delivered_to = 0
+        for member in recipients:
+            if send_to_user(member, {
+                "type": "NEW_MESSAGE", "messageId": str(message_id),
+                "fromUser": sender, "roomId": name, "content": content,
+                "timestamp": timestamp,
+            }):
+                delivered_to += 1
+        if delivered_to:
+            self.reply({"type": "MESSAGE_DELIVERED", "messageId": str(message_id),
+                        "deliveredAt": timestamp, "room": name,
+                        "recipients": delivered_to})
+        else:
+            self.reply({"type": "MESSAGE_STORED", "messageId": str(message_id),
+                        "message": "Message saved; no other room members are online."})
+
     def store_and_deliver(self, sender, recipient, content):
 
         """Persist a message, then push it live if the recipient is online.
@@ -1360,9 +1621,18 @@ class ChatHandler(socketserver.StreamRequestHandler):
 
                 ACTIVE_CLIENTS.pop(username, None)
 
+                # Lock order ACTIVE_CLIENTS -> ROOMS is the only nesting used.
+                self.left_rooms = leave_all_rooms(username)
+
         if token:
 
             database.delete_session(token)
+
+        rooms_left, self.left_rooms = self.left_rooms, []
+
+        for room_key in rooms_left:
+
+            broadcast_room_event(room_key, "LEFT", username)
 
         self.username = None
 
