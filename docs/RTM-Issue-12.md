@@ -1,28 +1,26 @@
 # Requirements Traceability Matrix (RTM)
 
-**Related issue:** #12 — PRC-12: Test planning  
-**Source documents:** SRS and STP submitted for the Team 5 chat application  
-**Evidence reviewed:** `tests/test_auth.py`, `tests/test_database.py`, and `tests/test_server.py` as supplied for review.
+**Related issues:** #12 (map issues to test case IDs and define the RTM status legend) and #7 (update the RTM from verified results)  
+**Source documents:** SRS, SAD and STP submitted for the Team 5 chat application  
+**Evidence:** `python -m pytest -v` on `main` after all Sprint 2 pull requests were merged: 115 tests collected, 115 passed, 0 failed. CI run: https://github.com/yashita164/SE-Mini-Project/actions/runs/40567424923
 
 ## Purpose
 
-This matrix maps each SRS requirement to its existing STP test-case ID and records the test code found in the reviewed files. GitHub Actions executed `python -m pytest -v`, collecting and passing 37 tests with no failures. However, a passing test suite does not automatically prove that every requirement is fully covered. Individual RTM assessments must be based on the relevant test assertions and the expected results defined in the STP.
+This matrix maps each SRS requirement to its STP test-case ID, names the automated tests that provide the evidence, and records the verified result. A passing test shows that the behaviour the test checks works. Where a test checks less than the requirement says (for example a single latency sample against a 95th-percentile target), the row is marked accordingly instead of passed.
 
-## Proposed RTM status definitions — pending team agreement
+## Status definitions
 
-| Code | Proposed meaning | When to use |
+The SRS sample RTM used `N` without defining it. It is treated here as "not yet verified" and replaced by the codes below.
+
+| Code | Meaning | When to use |
 |---|---|---|
 | P | Passed | The relevant test was executed and met its expected result. |
 | F | Failed | The relevant test was executed and did not meet its expected result. |
-| NR | Not Run | A meaningful test exists, but its execution result has not been recorded. |
-| NI | Not Implemented | No meaningful test implementation exists yet for the planned test case. |
-| B | Blocked | The test cannot currently be executed because of a documented dependency or blocker. |
-
-**Team decision required:** the SRS sample RTM currently uses `N`, but the SRS does not define it. Agree what `N` means before changing existing rows. If the team adopts this proposal, replace `N` with `NR` only when the test exists but has not been run; use `NI` when no meaningful test implementation exists.
+| NR | Not Run | A test exists but does not fully cover the requirement, or its result has not been recorded. |
+| NI | Not Implemented | No meaningful test (or no implementation) exists yet for the planned test case. |
+| B | Blocked | The test cannot be executed because of a documented dependency or blocker. |
 
 ## RTM
-
-“Test code evidence” describes the supplied files only. “Implementation assessment” is preliminary and is not a test pass/fail result.
 
 | Requirement ID | Requirement (short name) | STP test case | Test evidence (current `main`) | Status |
 |---|---|---|---|---|
@@ -56,44 +54,28 @@ This matrix maps each SRS requirement to its existing STP test-case ID and recor
 | CHAT-SR-004 | Session tokens | TC-Sec-04 | `test_session_token_is_required_for_protected_requests`, token tests in `test_sr003_fuzz.py` | P |
 | CHAT-SR-005 | Per-IP rate limiting | TC-Sec-05 | Not implemented | NI |
 
-## Test cases needing implementation or follow-up
+**Totals:** 29 requirements: 21 P, 1 NR, 7 NI, 0 F, 0 B.
 
-Based on the three reviewed files, these test cases have no dedicated meaningful test identified or have an incomplete test stub:
+## Test cases still open
 
-- `TC-Auth-03` — logout / close socket
-- `TC-Auth-04` — abrupt disconnection
-- `TC-Grp-01` — create room
-- `TC-Grp-02` — join / leave room
-- `TC-Grp-03` — room message broadcast
-- `TC-Grp-04` — display online users
-- `TC-Admin-01` — admin announcement
-- `TC-Admin-02` — kick / ban
-- `TC-Admin-03` — admin action logging
-- `TC-Scale-01` — 200 concurrent clients
-- `TC-Rel-01` — dead connection cleanup within 30 seconds
-- `TC-Ops-01` — 90-day history retention
-- `TC-UX-01` — UI responsiveness during socket I/O
-- `TC-Sec-01` — TLS / SSL
-- `TC-Sec-05` — per-IP rate limiting
+- `TC-Auth-03` logout closing the socket: not implemented (defect D-06).
+- `TC-Auth-04` and `TC-Rel-01` abrupt disconnect and dead-connection cleanup: no heartbeat (recorded in docs/deviations.md).
+- `TC-Scale-01` 200 concurrent clients: no load test written.
+- `TC-Ops-01` 90-day retention: messages are kept but only the latest 50 are returned; no retention test.
+- `TC-Sec-01` TLS and `TC-Sec-05` rate limiting: not implemented (recorded in docs/deviations.md).
+- `TC-Perf-01` latency: the current test checks one delivery against 500 ms; the 95th-percentile target over a sample is not measured (status NR).
 
-Additional follow-up / coverage confirmation:
+## Evidence and completion checklist (issues #12 and #7)
 
-- `TC-Msg-04`: existing acknowledgement assertions appear in live messaging tests; confirm they meet the STP's full expected results and add a dedicated test if needed.
-- `TC-Perf-01`: the current integration test checks one message's latency, not the p95 requirement across a defined sample.
-- `TC-Sec-03` and `TC-Sec-04`: related tests exist, but compare their assertions with the complete STP test steps before marking full coverage.
-
-## Evidence and completion checklist for Issue #12
-
-- [x] Every SRS requirement listed above is mapped to its existing STP test-case ID.
-- [x] Preliminary test-code gaps are listed from the reviewed files.
-- [ ] Team agrees on RTM status definitions and clarifies the existing `N` value.
-- [x] Run the test suite: GitHub Actions collected 37 tests and all 37 passed.
-- [ ] Link this RTM and the test-gap list in Issue #12.
-- [ ] Submit a pull request referencing Issue #12.
-- [ ] Obtain review from a teammate other than the author.
-- [ ] Ensure CI passes and add the CI run URL to Issue #12.
-- [ ] Link evidence for each acceptance criterion in Issue #12.
+- [x] Every SRS requirement is mapped to its STP test-case ID.
+- [x] Status legend defined and the undefined `N` value replaced.
+- [x] Test suite run on `main`: 115 tests, all passed. CI run: https://github.com/yashita164/SE-Mini-Project/actions/runs/40567424923
+- [x] Statuses updated from the verified results (#7).
+- [x] Open test cases listed with reasons.
+- [ ] Pull request referencing #12 and #7.
+- [ ] Review from a teammate other than the author.
+- [ ] CI run URL added to issues #12 and #7.
 
 ## Scope note
 
-This RTM is a draft based on the SRS/STP mappings and the three test files reviewed. “No dedicated test identified” means no corresponding test was found in those files; it does not prove the feature itself is absent. Before merge, compare the table against the current repository versions of the SRS, STP, and test suite, and get team agreement on the status legend.
+A status of `P` means the named automated test passed in the run linked above. It does not claim coverage beyond what the test asserts; rows where the test is narrower than the requirement are marked NR.
