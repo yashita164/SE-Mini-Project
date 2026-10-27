@@ -20,13 +20,24 @@
 
 ## 2. Protocol choices the SAD does not fix
 
-_To be completed under issue #6._
+- **Framing:** each request and response is one JSON object on one line, UTF-8 encoded, ending with a newline. A request line may be at most 16 KiB; longer input gets error 413 and the connection is closed.
+- **Sessions:** a successful login returns a random session token. Every later request must carry that token, and the server checks it on each request. A connection holds one session; logging in again from another connection closes the older one.
+- **Errors:** failures use HTTP-style numeric codes in the response (400 bad request, 401 not authenticated, 404 not found, 409 conflict, 413 too large, 500 internal error).
+- **Messages:** private messages are limited to 4,000 characters. The sender gets `MESSAGE_DELIVERED` when the message was written to the recipient's connection, or `MESSAGE_STORED` when the recipient is offline. Stored messages are replayed in order at the recipient's next login.
+- **Typing indicator:** sent only to the named recipient, and only if that recipient is online.
+- **File transfer:** the sender announces the file (name, size, SHA-256 checksum), then sends 8 KiB base64 chunks. The server checks size and checksum before forwarding to the recipient, who checks them again. The size limit is 1 MiB.
+- **Administration:** administrators are the usernames listed in the `CHAT_ADMIN_USERS` environment variable of the server. Announcements, kicks and bans are written to an audit table with a timestamp and the administrator's name.
+- **Timestamps:** ISO 8601 in UTC.
 
 ## 3. SRS ambiguities and how the team resolved them
 
 | Ambiguity | Resolution |
 |---|---|
 | bcrypt only uses the first 72 bytes of a password. The SRS sets no maximum length. | Passwords must be 8-72 UTF-8 bytes; longer passwords are rejected rather than silently truncated. |
+| The SRS sets no maximum message size. | Messages are limited to 4,000 characters, inside a 16 KiB request line. Larger input is rejected with code 413. |
+| The SRS says "configured size limit" for files but gives no value. | The limit is 1 MiB per file, set as a constant in `server.py` and `client.py`. |
+| The SRS does not say how usernames are written. | Usernames are 3 to 24 letters, digits or underscores, and are not case-sensitive. |
+| The SRS does not say who an administrator is. | The server operator lists administrator usernames in the `CHAT_ADMIN_USERS` environment variable. |
 
 ## 4. Sprint 1 recovery
 
