@@ -136,3 +136,7 @@ the entire server. An administrator can use `kick` to disconnect an online
 user or `ban` to persist a server-wide ban and disconnect that user if online.
 Banned users are refused at their next login, including after the server
 restarts. Both commands accept an optional reason.
+
+Successful administrator announcements, kicks, and bans are recorded in the
+SQLite `admin_audit_log` table with the administrator username, UTC timestamp,
+action, target when applicable, and announcement text or moderation reason.
