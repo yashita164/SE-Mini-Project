@@ -41,4 +41,8 @@
 
 ## 4. Sprint 1 recovery
 
-_To be completed under issue #6._
+Sprint 1 was planned for 19–23 October. The first working prototype (registration, login, private messaging and typing indicators) and the Sprint 1 demo video were committed on 25 October, and the remaining Sprint 1 items (bcrypt verification, offline message queue, latency test, defect log, PR workflow, and authentication and CI setup) were merged on 26 October, so Sprint 1 finished about three days after its planned end.
+
+Items still open at the end of Sprint 1 were labelled `carried-from-sprint-1` and moved into Sprint 2, including the RTM update (#7) and this deviations document (#6).
+
+Recovery: the delay came from completing and integrating the remaining Sprint 1 functionality, tests and the CI and pull-request workflow after the initial prototype was committed on 25 October. The team finished these through follow-up pull requests merged on 26 October, with automated tests running in CI on every push and pull request. Only the documentation items (#6 and #7) were carried into Sprint 2, and all code work for Sprint 2 followed the same pull-request workflow.
