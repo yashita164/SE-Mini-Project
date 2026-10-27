@@ -24,37 +24,37 @@ This matrix maps each SRS requirement to its existing STP test-case ID and recor
 
 “Test code evidence” describes the supplied files only. “Implementation assessment” is preliminary and is not a test pass/fail result.
 
-| Requirement ID | Requirement (short name) | Existing STP test-case ID | Test code evidence in reviewed files | Implementation assessment | Execution status |
-|---|---|---|---|---|---|
-| CHAT-F-001 | Register account | TC-Auth-01 | `test_auth.py`: successful, duplicate, and invalid registration; `test_server.py`: registration integration tests | Found | NR — run not verified |
-| CHAT-F-002 | Authenticate credentials | TC-Auth-02 | `test_auth.py`: valid login/session and invalid password; `test_server.py`: TCP login tests | Found | NR — run not verified |
-| CHAT-F-003 | Logout / close socket | TC-Auth-03 | No dedicated test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
-| CHAT-F-004 | Detect abrupt disconnection | TC-Auth-04 | No dedicated test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
-| CHAT-F-010 | Private message | TC-Msg-01 | `test_server.py`: private message reaches intended recipient only | Found | NR — run not verified |
-| CHAT-F-011 | Real-time delivery | TC-Msg-02 | `test_server.py`: delivery latency target and message acknowledgement behavior | Found | NR — run not verified |
-| CHAT-F-012 | Queue offline messages | TC-Msg-03 | `test_database.py` queue/migration tests and `test_server.py` offline delivery, order, recipient-only, and once-only tests | Found | NR — run not verified |
-| CHAT-F-013 | Delivery acknowledgement | TC-Msg-04 | `test_server.py` checks `MESSAGE_DELIVERED` and matching message IDs in live messaging tests | Partial / equivalent behavior found; confirm against full STP expected results | NR — run not verified |
-| CHAT-F-014 | Typing indicator | TC-Msg-05 | `test_server.py`: typing start/stop events and authentication requirement | Found | NR — run not verified |
-| CHAT-F-015 | Persist chat history | TC-Msg-06 | `test_server.py`: message history and history after reconnect | Found | NR — run not verified |
-| CHAT-F-020 | Create room | TC-Grp-01 | No dedicated test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
-| CHAT-F-021 | Join / leave room | TC-Grp-02 | No dedicated test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
-| CHAT-F-022 | Room message broadcast | TC-Grp-03 | No dedicated test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
-| CHAT-F-023 | Display online users | TC-Grp-04 | No dedicated test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
-| CHAT-F-030 | File attachment | TC-File-01 | `test_server.py`: `test_file_transfer_preserves_bytes_and_checksum` | Test found; CI test passed. Confirm full coverage against STP expected results. | Executed — passed in the recorded CI run |
-| CHAT-F-031 | Reject oversized files | TC-File-02 | `test_server.py`: oversized file metadata rejected with code 413 | Found | NR — run not verified |
-| CHAT-F-040 | Admin announcement | TC-Admin-01 | No dedicated test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
-| CHAT-F-041 | Kick / ban | TC-Admin-02 | No dedicated test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
-| CHAT-F-042 | Log admin actions | TC-Admin-03 | No dedicated test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
-| CHAT-NF-001 | Latency ≤ 500 ms p95 | TC-Perf-01 | `test_server.py` measures a single delivery and asserts under 500 ms; it does not establish p95 latency across a sample | Partial — current test checks one delivery, not p95 | NR — run not verified |
-| CHAT-NF-002 | 200 concurrent clients | TC-Scale-01 | No dedicated load/concurrency test identified | NI — add a load test for the stated target | Not run; test not identified |
-| CHAT-NF-003 | Dead connection cleanup within 30 s | TC-Rel-01 | No dedicated cleanup-timing test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
-| CHAT-NF-004 | 90-day history retention | TC-Ops-01 | No dedicated retention test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
-| CHAT-NF-005 | Responsive UI during socket I/O | TC-UX-01 | No dedicated UI responsiveness test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
-| CHAT-SR-001 | TLS / SSL | TC-Sec-01 | No dedicated TLS/SSL test identified | NI — add a dedicated test or document an existing equivalent | Not run; test not identified |
-| CHAT-SR-002 | Password hashing | TC-Sec-02 | `test_auth.py`: bcrypt hash, salt uniqueness, format, plaintext absence; `test_server.py`: plaintext not in server logs | Found | NR — run not verified |
-| CHAT-SR-003 | Input validation / sanitization | TC-Sec-03 | `test_server.py`: malformed JSON, unknown request, empty message, and unknown recipient checks | Partial — confirm sanitization coverage against the SRS requirement | NR — run not verified |
-| CHAT-SR-004 | Session tokens | TC-Sec-04 | `test_auth.py` checks token issuance and database lookup; `test_server.py` checks valid/invalid-token access for messages/history/typing | Partial — confirm token-specific STP scenarios and expiry/invalidity expectations | NR — run not verified |
-| CHAT-SR-005 | Per-IP rate limiting | TC-Sec-05 | No dedicated rate-limit test identified | NI — add a test that verifies per-IP limiting | Not run; test not identified |
+| Requirement ID | Requirement (short name) | STP test case | Test evidence (current `main`) | Status |
+|---|---|---|---|---|
+| CHAT-F-001 | Register account | TC-Auth-01 | `test_auth.py` (`test_auth_01_*`), `test_server.py` registration tests | P |
+| CHAT-F-002 | Authenticate credentials | TC-Auth-02 | `test_auth.py` (`test_auth_02_*`), `test_server_rejects_invalid_login` | P |
+| CHAT-F-003 | Logout / close socket | TC-Auth-03 | No dedicated test; logout leaves the socket open (defect D-06) | NI |
+| CHAT-F-004 | Detect abrupt disconnection | TC-Auth-04 | No heartbeat or timeout test (see deviations) | NI |
+| CHAT-F-010 | Private message | TC-Msg-01 | `test_private_message_reaches_only_recipient` | P |
+| CHAT-F-011 | Real-time delivery | TC-Msg-02 | `test_tc_msg_02_real_time_delivery_within_latency_target` | P |
+| CHAT-F-012 | Queue offline messages | TC-Msg-03 | `test_msg_03_*` in `test_server.py` and `test_database.py` | P |
+| CHAT-F-013 | Delivery acknowledgement | TC-Msg-04 | `test_f013_delivery_ack.py` (4 tests) | P |
+| CHAT-F-014 | Typing indicator | TC-Msg-05 | `test_typing_indicator_*` | P |
+| CHAT-F-015 | Persist chat history | TC-Msg-06 | `test_message_is_saved_in_history`, `test_history_survives_reconnect` | P |
+| CHAT-F-020 | Create room | TC-Grp-01 | `test_rooms.py` (create, invalid and duplicate names) | P |
+| CHAT-F-021 | Join / leave room | TC-Grp-02 | `test_rooms.py` (join, leave, error cases) | P |
+| CHAT-F-022 | Room message broadcast | TC-Grp-03 | `test_rooms.py` (broadcast, non-member rules) | P |
+| CHAT-F-023 | Display online users | TC-Grp-04 | `test_rooms.py` (global and per-room lists) | P |
+| CHAT-F-030 | File attachment | TC-File-01 | `test_file_transfer_preserves_bytes_and_checksum` | P |
+| CHAT-F-031 | Reject oversized files | TC-File-02 | `test_file_transfer_rejects_file_over_configured_limit` | P |
+| CHAT-F-040 | Admin announcement | TC-Admin-01 | `test_tc_admin_01_*` | P |
+| CHAT-F-041 | Kick / ban | TC-Admin-02 | `test_tc_admin_02_*` (server-wide only, see deviations) | P |
+| CHAT-F-042 | Log admin actions | TC-Admin-03 | `test_tc_admin_03_*` | P |
+| CHAT-NF-001 | Latency ≤ 500 ms at p95 | TC-Perf-01 | One delivery is checked against 500 ms; p95 over a sample is not measured | NR |
+| CHAT-NF-002 | 200 concurrent clients | TC-Scale-01 | No load test | NI |
+| CHAT-NF-003 | Dead-connection cleanup within 30 s | TC-Rel-01 | No heartbeat, no test | NI |
+| CHAT-NF-004 | 90-day history retention | TC-Ops-01 | No retention test; history request returns the latest 50 | NI |
+| CHAT-NF-005 | Responsive UI during socket I/O | TC-UX-01 | `test_tc_ux_01_user_can_send_while_receiver_waits_on_slow_network` | P |
+| CHAT-SR-001 | TLS / SSL | TC-Sec-01 | Not implemented (see deviations) | NI |
+| CHAT-SR-002 | Password hashing | TC-Sec-02 | `test_sec_02_*` in `test_auth.py` and `test_server.py` | P |
+| CHAT-SR-003 | Input validation | TC-Sec-03 | `test_sr003_fuzz.py` (35 tests) and `test_malformed_json_returns_error_and_connection_recovers` | P |
+| CHAT-SR-004 | Session tokens | TC-Sec-04 | `test_session_token_is_required_for_protected_requests`, token tests in `test_sr003_fuzz.py` | P |
+| CHAT-SR-005 | Per-IP rate limiting | TC-Sec-05 | Not implemented | NI |
 
 ## Test cases needing implementation or follow-up
 
