@@ -1598,6 +1598,7 @@ class ChatHandler(socketserver.StreamRequestHandler):
         })
 
         self.cleanup()
+        self.close_after_request = True
 
     def cleanup(self):
 
