@@ -45,7 +45,7 @@ def send_json(sock, lock, payload):
 
         sock.sendall(data)
 
-def receive_messages(sock, responses, stop_event):
+def receive_messages(sock, responses, stop_event, send_lock=None):
     """Read server events, including reconstructing incoming file transfers."""
     incoming_files = {}
     try:
@@ -68,6 +68,13 @@ def receive_messages(sock, responses, stop_event):
 
                 kind = message.get("type")
                 transfer_id = message.get("transferId")
+                if kind == "PING":
+                    if send_lock is not None:
+                        try:
+                            send_json(sock, send_lock, {"type": "PONG"})
+                        except (OSError, ConnectionError):
+                            break
+                    continue
                 if kind in ("NEW_MESSAGE", "ROOM_EVENT"):
                     print(f"\n{format_incoming(message)}\n> ", end="", flush=True)
                 elif kind == "ADMIN_ANNOUNCEMENT":
@@ -503,7 +510,7 @@ def main():
 
         target=receive_messages,
 
-        args=(sock, responses, stop_event),
+        args=(sock, responses, stop_event, send_lock),
 
         daemon=True,
 

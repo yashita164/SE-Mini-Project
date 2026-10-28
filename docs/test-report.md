@@ -45,7 +45,7 @@ All 115 automated tests pass on `main`. This does not mean every STP test case p
 | TC-Auth-01 | CHAT-F-001 | Passed | `test_auth.py` (`test_auth_01_*`) and server registration tests |
 | TC-Auth-02 | CHAT-F-002 | Passed | `test_auth_02_*`, `test_server_rejects_invalid_login` |
 | TC-Auth-03 | CHAT-F-003 | Not executed | No test; logout leaves the socket open (defect D-06) |
-| TC-Auth-04 | CHAT-F-004 | Not executed | No heartbeat or timeout test |
+| TC-Auth-04 | CHAT-F-004 | Passed | `test_silent_disconnect_is_removed_from_presence_and_session` |
 | TC-Msg-01 | CHAT-F-010 | Passed | `test_private_message_reaches_only_recipient` |
 | TC-Msg-02 | CHAT-F-011 | Passed | `test_tc_msg_02_real_time_delivery_within_latency_target` |
 | TC-Msg-03 | CHAT-F-012 | Passed | `test_msg_03_*` in `test_server.py` and `test_database.py` |
@@ -63,7 +63,7 @@ All 115 automated tests pass on `main`. This does not mean every STP test case p
 | TC-Admin-03 | CHAT-F-042 | Passed | `test_tc_admin_03_*` |
 | TC-Perf-01 | CHAT-NF-001 | Partly covered | One delivery is checked against 500 ms; the 95th percentile over a sample is not measured |
 | TC-Scale-01 | CHAT-NF-002 | Not executed | No load test for 200 clients |
-| TC-Rel-01 | CHAT-NF-003 | Not executed | No heartbeat, so no cleanup-timing test |
+| TC-Rel-01 | CHAT-NF-003 | Passed | `test_silent_disconnect_is_removed_from_presence_and_session` verifies cleanup within the 30-second requirement |
 | TC-Ops-01 | CHAT-NF-004 | Not executed | No retention test; history returns the latest 50 |
 | TC-UX-01 | CHAT-NF-005 | Passed | `tests/test_client.py` |
 | TC-Sec-01 | CHAT-SR-001 | Not executed | TLS not implemented |
@@ -72,7 +72,7 @@ All 115 automated tests pass on `main`. This does not mean every STP test case p
 | TC-Sec-04 | CHAT-SR-004 | Passed | `test_session_token_is_required_for_protected_requests`, token tests in `test_sr003_fuzz.py` |
 | TC-Sec-05 | CHAT-SR-005 | Not executed | Rate limiting not implemented |
 
-**Totals:** 29 STP test cases: 21 passed, 1 partly covered, 7 not executed.
+**Totals:** 29 STP test cases: 23 passed, 1 partly covered, 5 not executed.
 
 ## 5. Test cases not executed
 

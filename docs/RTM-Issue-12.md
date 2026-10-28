@@ -27,7 +27,7 @@ The SRS sample RTM used `N` without defining it. It is treated here as "not yet 
 | CHAT-F-001 | Register account | TC-Auth-01 | `test_auth.py` (`test_auth_01_*`), `test_server.py` registration tests | P |
 | CHAT-F-002 | Authenticate credentials | TC-Auth-02 | `test_auth.py` (`test_auth_02_*`), `test_server_rejects_invalid_login` | P |
 | CHAT-F-003 | Logout / close socket | TC-Auth-03 | No dedicated test; logout leaves the socket open (defect D-06) | NI |
-| CHAT-F-004 | Detect abrupt disconnection | TC-Auth-04 | No heartbeat or timeout test (see deviations) | NI |
+| CHAT-F-004 | Detect abrupt disconnection | TC-Auth-04 | `test_silent_disconnect_is_removed_from_presence_and_session` | I |
 | CHAT-F-010 | Private message | TC-Msg-01 | `test_private_message_reaches_only_recipient` | P |
 | CHAT-F-011 | Real-time delivery | TC-Msg-02 | `test_tc_msg_02_real_time_delivery_within_latency_target` | P |
 | CHAT-F-012 | Queue offline messages | TC-Msg-03 | `test_msg_03_*` in `test_server.py` and `test_database.py` | P |
@@ -45,7 +45,7 @@ The SRS sample RTM used `N` without defining it. It is treated here as "not yet 
 | CHAT-F-042 | Log admin actions | TC-Admin-03 | `test_tc_admin_03_*` | P |
 | CHAT-NF-001 | Latency ≤ 500 ms at p95 | TC-Perf-01 | One delivery is checked against 500 ms; p95 over a sample is not measured | NR |
 | CHAT-NF-002 | 200 concurrent clients | TC-Scale-01 | No load test | NI |
-| CHAT-NF-003 | Dead-connection cleanup within 30 s | TC-Rel-01 | No heartbeat, no test | NI |
+| CHAT-NF-003 | Dead-connection cleanup within 30 s | TC-Rel-01 | `test_silent_disconnect_is_removed_from_presence_and_session` | I |
 | CHAT-NF-004 | 90-day history retention | TC-Ops-01 | No retention test; history request returns the latest 50 | NI |
 | CHAT-NF-005 | Responsive UI during socket I/O | TC-UX-01 | `test_tc_ux_01_user_can_send_while_receiver_waits_on_slow_network` | P |
 | CHAT-SR-001 | TLS / SSL | TC-Sec-01 | Not implemented (see deviations) | NI |
@@ -59,7 +59,6 @@ The SRS sample RTM used `N` without defining it. It is treated here as "not yet 
 ## Test cases still open
 
 - `TC-Auth-03` logout closing the socket: not implemented (defect D-06).
-- `TC-Auth-04` and `TC-Rel-01` abrupt disconnect and dead-connection cleanup: no heartbeat (recorded in docs/deviations.md).
 - `TC-Scale-01` 200 concurrent clients: no load test written.
 - `TC-Ops-01` 90-day retention: messages are kept but only the latest 50 are returned; no retention test.
 - `TC-Sec-01` TLS and `TC-Sec-05` rate limiting: not implemented (recorded in docs/deviations.md).

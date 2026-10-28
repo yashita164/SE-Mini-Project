@@ -33,35 +33,64 @@ def receive_json(sock, stream, timeout=SOCKET_TIMEOUT):
 
     """Receive one newline-delimited JSON response."""
 
-    sock.settimeout(timeout)
+    deadline = time.monotonic() + timeout
 
-    line = stream.readline()
+    while True:
 
-    if not line:
+        sock.settimeout(max(0.01, deadline - time.monotonic()))
 
-        raise AssertionError(
+        line = stream.readline()
 
-            "Server closed the connection unexpectedly."
+        if not line:
 
-        )
+            raise AssertionError(
 
-    return json.loads(line.decode("utf-8"))
+                "Server closed the connection unexpectedly."
+
+            )
+
+        response = json.loads(line.decode("utf-8"))
+
+        if response.get("type") == "PING":
+
+            sock.sendall(b'{"type":"PONG"}\n')
+
+            if time.monotonic() >= deadline:
+                raise AssertionError("Timed out while handling heartbeat messages.")
+
+            continue
+
+        return response
 
 def expect_no_message(sock, stream, timeout=0.3):
 
-    """Assert that no message arrives within the specified interval."""
+    """Assert that no message arrives within the specified interval, ignoring heartbeats."""
 
-    sock.settimeout(timeout)
+    deadline = time.monotonic() + timeout
 
-    try:
+    while True:
 
-        data = stream.readline()
+        sock.settimeout(max(0.01, deadline - time.monotonic()))
 
-    except socket.timeout:
+        try:
 
-        return
+            data = stream.readline()
 
-    if data:
+        except socket.timeout:
+
+            return
+
+        if not data:
+
+            return
+
+        message = json.loads(data.decode("utf-8"))
+
+        if message.get("type") == "PING":
+
+            sock.sendall(b'{"type":"PONG"}\n')
+
+            continue
 
         raise AssertionError(
 
@@ -141,7 +170,13 @@ class ChatTestClient:
 
     def receive(self, timeout=SOCKET_TIMEOUT):
 
-        return receive_json(self.sock, self.stream, timeout)
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = max(0.1, deadline - time.monotonic())
+            response = receive_json(self.sock, self.stream, remaining)
+            if response is None or response.get("type") != "PING":
+                return response
+            self.send({"type": "PONG"})
 
     def register(self, username, password="SecurePass123"):
 
@@ -523,29 +558,15 @@ def test_unauthenticated_message_is_rejected(running_server, token):
     ids=["missing-token", "invalid-token"],
 )
 def test_history_requires_authentication(running_server, token):
-
     """History requests require a valid session."""
-
     with ChatTestClient(running_server) as client:
-
-        request = {
-
-            "type": "HISTORY_REQUEST",
-
-        }
-
+        request = {"type": "HISTORY_REQUEST"}
         if token is not None:
-
             request["token"] = token
-
         client.send(request)
-
         response = client.receive()
-
         assert response["type"] == "ERROR"
-
         assert response["code"] == 401
-
 
 @pytest.mark.parametrize(
     "request_type,response_type",
@@ -608,6 +629,30 @@ def test_successful_logout_closes_connection_and_removes_active_client(
 
         client.sock.settimeout(1.0)
         assert client.stream.readline() == b""
+
+
+def test_silent_disconnect_is_removed_from_presence_and_session(
+    running_server, monkeypatch
+):
+    """TC-Auth-04 / TC-Rel-01: unresponsive clients lose presence and sessions."""
+    monkeypatch.setattr(server, "HEARTBEAT_INTERVAL_SECONDS", 0.05)
+    monkeypatch.setattr(server, "HEARTBEAT_TIMEOUT_SECONDS", 0.25)
+
+    with ChatTestClient(running_server) as client:
+        register_and_login(client, "silent_disconnect_user")
+        token = client.token
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            with server.ACTIVE_CLIENTS_LOCK:
+                if "silent_disconnect_user" not in server.ACTIVE_CLIENTS:
+                    break
+            time.sleep(0.02)
+
+        with server.ACTIVE_CLIENTS_LOCK:
+            assert "silent_disconnect_user" not in server.ACTIVE_CLIENTS
+        assert database.get_session_user(token) is None
+
 
 def test_malformed_json_returns_error_and_connection_recovers(
 

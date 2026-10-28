@@ -10,6 +10,7 @@ import base64
 import hashlib
 import json
 import os
+import socket
 
 import re
 import sys
@@ -44,6 +45,12 @@ FILE_CHUNK_SIZE = 8_192  # Base64 JSON request remains below MAX_REQUEST_BYTES
 ACTIVE_CLIENTS = {}
 
 ACTIVE_CLIENTS_LOCK = threading.Lock()
+
+HEARTBEAT_INTERVAL_SECONDS = 10.0
+HEARTBEAT_TIMEOUT_SECONDS = 30.0
+HEARTBEAT_LAST_SEEN = {}
+HEARTBEAT_TOKENS = {}
+HEARTBEAT_LOCK = threading.Lock()
 
 # Serialises "store + live-deliver" (sender side) against "register + replay
 # queued messages" (login side) so a message is never delivered twice and
@@ -284,6 +291,12 @@ class ChatHandler(socketserver.StreamRequestHandler):
 
             self.handle_logout(request)
 
+        elif request_type == "PONG":
+
+            if self.username is not None:
+                with HEARTBEAT_LOCK:
+                    HEARTBEAT_LAST_SEEN[self.username] = datetime.now(timezone.utc).timestamp()
+
         elif request_type == "SEND_MESSAGE":
 
             self.handle_send_message(request)
@@ -474,6 +487,10 @@ class ChatHandler(socketserver.StreamRequestHandler):
         self.username = username
 
         self.token = token
+
+        with HEARTBEAT_LOCK:
+            HEARTBEAT_LAST_SEEN[username] = datetime.now(timezone.utc).timestamp()
+            HEARTBEAT_TOKENS[username] = token
 
         # Close any previous active connection for this username.
 
@@ -1625,6 +1642,10 @@ class ChatHandler(socketserver.StreamRequestHandler):
                 # Lock order ACTIVE_CLIENTS -> ROOMS is the only nesting used.
                 self.left_rooms = leave_all_rooms(username)
 
+                with HEARTBEAT_LOCK:
+                    HEARTBEAT_LAST_SEEN.pop(username, None)
+                    HEARTBEAT_TOKENS.pop(username, None)
+
         if token:
 
             database.delete_session(token)
@@ -1639,6 +1660,35 @@ class ChatHandler(socketserver.StreamRequestHandler):
 
         self.token = None
 
+def remove_stale_connection(username, client_socket, token=None):
+    """Atomically remove one timed-out or failed connection from presence."""
+    left_rooms = []
+    with ACTIVE_CLIENTS_LOCK:
+        current = ACTIVE_CLIENTS.get(username)
+        if current is None or current[0] is not client_socket:
+            return
+        ACTIVE_CLIENTS.pop(username, None)
+        left_rooms = leave_all_rooms(username)
+    with HEARTBEAT_LOCK:
+        HEARTBEAT_LAST_SEEN.pop(username, None)
+        if token is None:
+            token = HEARTBEAT_TOKENS.pop(username, None)
+        else:
+            HEARTBEAT_TOKENS.pop(username, None)
+    if token:
+        database.delete_session(token)
+    for room_key in left_rooms:
+        broadcast_room_event(room_key, "LEFT", username)
+    try:
+        client_socket.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
+    try:
+        client_socket.close()
+    except OSError:
+        pass
+
+
 class ChatServer(socketserver.ThreadingTCPServer):
 
     """TCP server that handles clients in separate threads."""
@@ -1646,6 +1696,36 @@ class ChatServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
 
     daemon_threads = True
+
+    def __init__(self, server_address, request_handler_class):
+        super().__init__(server_address, request_handler_class)
+        self.stop_heartbeat = threading.Event()
+        self.heartbeat_thread = threading.Thread(
+            target=self._heartbeat_monitor, name="chat-heartbeat-monitor", daemon=True
+        )
+        self.heartbeat_thread.start()
+
+    def _heartbeat_monitor(self):
+        """Ping logged-in clients and remove silent or unresponsive presence."""
+        while not self.stop_heartbeat.wait(min(HEARTBEAT_INTERVAL_SECONDS, 1.0)):
+            now = datetime.now(timezone.utc).timestamp()
+            with ACTIVE_CLIENTS_LOCK:
+                clients = list(ACTIVE_CLIENTS.items())
+            for username, (client_socket, send_lock) in clients:
+                with HEARTBEAT_LOCK:
+                    last_seen = HEARTBEAT_LAST_SEEN.get(username, now)
+                if now - last_seen >= HEARTBEAT_TIMEOUT_SECONDS:
+                    remove_stale_connection(username, client_socket)
+                    continue
+                try:
+                    send_json(client_socket, send_lock, {"type": "PING"})
+                except (OSError, ConnectionError):
+                    remove_stale_connection(username, client_socket)
+
+    def shutdown(self):
+        self.stop_heartbeat.set()
+        super().shutdown()
+        self.heartbeat_thread.join(timeout=1)
 
 def main():
 

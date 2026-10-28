@@ -34,11 +34,18 @@ class Conn:
 
     def recv(self):
         """Return the next JSON message, or None if the server closed/timed out."""
-        try:
-            line = self.stream.readline()
-        except (socket.timeout, OSError):
-            return None
-        return json.loads(line) if line else None
+        while True:
+            try:
+                line = self.stream.readline()
+            except (socket.timeout, OSError):
+                return None
+            if not line:
+                return None
+            message = json.loads(line)
+            if message.get("type") == "PING":
+                self.send({"type": "PONG"})
+                continue
+            return message
 
     def recv_type(self, wanted, limit=10):
         """Skip unrelated events until a message of type `wanted` arrives."""
