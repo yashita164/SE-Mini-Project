@@ -50,7 +50,7 @@ The SRS sample RTM used `N` without defining it. It is treated here as "not yet 
 | CHAT-NF-005 | Responsive UI during socket I/O | TC-UX-01 | `test_tc_ux_01_user_can_send_while_receiver_waits_on_slow_network` | P |
 | CHAT-SR-001 | TLS / SSL | TC-Sec-01 | Not implemented (see deviations) | NI |
 | CHAT-SR-002 | Password hashing | TC-Sec-02 | `test_sec_02_*` in `test_auth.py` and `test_server.py` | P |
-| CHAT-SR-003 | Input validation | TC-Sec-03 | `test_sr003_fuzz.py` (35 tests) and `test_malformed_json_returns_error_and_connection_recovers` | P |
+| CHAT-SR-003 | Input validation | TC-Sec-03 | `test_sr003_fuzz.py` (37 tests) and `test_malformed_json_returns_error_and_connection_recovers` | P |
 | CHAT-SR-004 | Session tokens | TC-Sec-04 | `test_session_token_is_required_for_protected_requests`, token tests in `test_sr003_fuzz.py` | P |
 | CHAT-SR-005 | Per-IP rate limiting | TC-Sec-05 | Not implemented | NI |
 
