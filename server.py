@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import socket
+import ssl
 
 import re
 import sys
@@ -1699,11 +1700,33 @@ class ChatServer(socketserver.ThreadingTCPServer):
 
     def __init__(self, server_address, request_handler_class):
         super().__init__(server_address, request_handler_class)
+        self.ssl_context = None
+        cert_file = os.environ.get("CHAT_TLS_CERT_FILE")
+        key_file = os.environ.get("CHAT_TLS_KEY_FILE")
+        if cert_file or key_file:
+            if not cert_file or not key_file:
+                raise ValueError("CHAT_TLS_CERT_FILE and CHAT_TLS_KEY_FILE must be set together")
+            self.ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            self.ssl_context.load_cert_chain(certfile=cert_file, keyfile=key_file)
+            self.ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
         self.stop_heartbeat = threading.Event()
         self.heartbeat_thread = threading.Thread(
             target=self._heartbeat_monitor, name="chat-heartbeat-monitor", daemon=True
         )
         self.heartbeat_thread.start()
+
+    def get_request(self):
+        """Accept a socket and upgrade it to TLS when certificate settings are present."""
+        client_socket, client_address = super().get_request()
+        if self.ssl_context is not None:
+            try:
+                client_socket = self.ssl_context.wrap_socket(
+                    client_socket, server_side=True
+                )
+            except (ssl.SSLError, OSError):
+                client_socket.close()
+                raise
+        return client_socket, client_address
 
     def _heartbeat_monitor(self):
         """Ping logged-in clients and remove silent or unresponsive presence."""
@@ -1737,7 +1760,10 @@ def main():
 
             print(f"Chat server listening on {HOST}:{PORT}")
 
-            print("Development only: localhost binding; TLS is not enabled.")
+            if server.ssl_context is None:
+                print("WARNING: TLS is not enabled; set CHAT_TLS_CERT_FILE and CHAT_TLS_KEY_FILE.")
+            else:
+                print("TLS 1.2+ enabled for socket communication.")
 
             server.serve_forever()
 

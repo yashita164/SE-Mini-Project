@@ -9,6 +9,8 @@ import uuid
 from pathlib import Path
 
 import socket
+import ssl
+import os
 
 import threading
 
@@ -495,6 +497,14 @@ def main():
             timeout=5,
 
         )
+
+        if os.environ.get("CHAT_TLS_ENABLED", "0").lower() in {"1", "true", "yes", "on"}:
+            tls_context = ssl.create_default_context()
+            ca_file = os.environ.get("CHAT_TLS_CA_FILE")
+            if ca_file:
+                tls_context.load_verify_locations(cafile=ca_file)
+            tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
+            sock = tls_context.wrap_socket(sock, server_hostname=HOST)
 
         sock.settimeout(None)
 

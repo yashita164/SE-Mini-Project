@@ -66,17 +66,17 @@ All 115 automated tests pass on `main`. This does not mean every STP test case p
 | TC-Rel-01 | CHAT-NF-003 | Passed | `test_silent_disconnect_is_removed_from_presence_and_session` verifies cleanup within the 30-second requirement |
 | TC-Ops-01 | CHAT-NF-004 | Not executed | No retention test; history returns the latest 50 |
 | TC-UX-01 | CHAT-NF-005 | Passed | `tests/test_client.py` |
-| TC-Sec-01 | CHAT-SR-001 | Not executed | TLS not implemented |
+| TC-Sec-01 | CHAT-SR-001 | Passed | `test_tls_handshake_round_trips_application_data` |
 | TC-Sec-02 | CHAT-SR-002 | Passed | `test_sec_02_*` |
 | TC-Sec-03 | CHAT-SR-003 | Passed | `test_sr003_fuzz.py` and `test_malformed_json_returns_error_and_connection_recovers` |
 | TC-Sec-04 | CHAT-SR-004 | Passed | `test_session_token_is_required_for_protected_requests`, token tests in `test_sr003_fuzz.py` |
 | TC-Sec-05 | CHAT-SR-005 | Not executed | Rate limiting not implemented |
 
-**Totals:** 29 STP test cases: 23 passed, 1 partly covered, 5 not executed.
+**Totals:** 29 STP test cases: 24 passed, 1 partly covered, 4 not executed.
 
 ## 5. Test cases not executed
 
-`TC-Auth-03`, `TC-Auth-04`, `TC-Scale-01`, `TC-Rel-01`, `TC-Ops-01`, `TC-Sec-01` and `TC-Sec-05` have no implemented test, because the feature behind them is missing or incomplete (see docs/deviations.md). `TC-Perf-01` has a test, but it does not measure the 95th-percentile target.
+`TC-Auth-03`, `TC-Scale-01`, `TC-Ops-01` and `TC-Sec-05` have no implemented test, because the feature behind them is missing or incomplete (see docs/deviations.md). `TC-Perf-01` has a test, but it does not measure the 95th-percentile target.
 
 ## 6. Defect summary
 

@@ -48,7 +48,7 @@ The SRS sample RTM used `N` without defining it. It is treated here as "not yet 
 | CHAT-NF-003 | Dead-connection cleanup within 30 s | TC-Rel-01 | `test_silent_disconnect_is_removed_from_presence_and_session` | I |
 | CHAT-NF-004 | 90-day history retention | TC-Ops-01 | No retention test; history request returns the latest 50 | NI |
 | CHAT-NF-005 | Responsive UI during socket I/O | TC-UX-01 | `test_tc_ux_01_user_can_send_while_receiver_waits_on_slow_network` | P |
-| CHAT-SR-001 | TLS / SSL | TC-Sec-01 | Not implemented (see deviations) | NI |
+| CHAT-SR-001 | TLS / SSL | TC-Sec-01 | `test_tls_handshake_round_trips_application_data` | I |
 | CHAT-SR-002 | Password hashing | TC-Sec-02 | `test_sec_02_*` in `test_auth.py` and `test_server.py` | P |
 | CHAT-SR-003 | Input validation | TC-Sec-03 | `test_sr003_fuzz.py` (37 tests) and `test_malformed_json_returns_error_and_connection_recovers` | P |
 | CHAT-SR-004 | Session tokens | TC-Sec-04 | `test_session_token_is_required_for_protected_requests`, token tests in `test_sr003_fuzz.py` | P |
@@ -61,7 +61,7 @@ The SRS sample RTM used `N` without defining it. It is treated here as "not yet 
 - `TC-Auth-03` logout closing the socket: not implemented (defect D-06).
 - `TC-Scale-01` 200 concurrent clients: no load test written.
 - `TC-Ops-01` 90-day retention: messages are kept but only the latest 50 are returned; no retention test.
-- `TC-Sec-01` TLS and `TC-Sec-05` rate limiting: not implemented (recorded in docs/deviations.md).
+- `TC-Sec-05` rate limiting: not implemented (recorded in docs/deviations.md).
 - `TC-Perf-01` latency: the current test checks one delivery against 500 ms; the 95th-percentile target over a sample is not measured (status NR).
 
 ## Evidence and completion checklist (issues #12 and #7)
