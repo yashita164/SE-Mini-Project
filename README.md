@@ -103,6 +103,26 @@ The server listens on `127.0.0.1:5000`. In each client, use `register` to
 create a distinct account and `login` to authenticate. The default database
 (`chat.db`) is created beside the server code on first start.
 
+### TLS/SSL deployment
+
+Supply a PEM certificate and private key to enable TLS 1.2+ on the server:
+
+```powershell
+$env:CHAT_TLS_CERT_FILE = "C:\\chat\\server-cert.pem"
+$env:CHAT_TLS_KEY_FILE = "C:\\chat\\server-key.pem"
+python server.py
+```
+
+Start clients in TLS mode with the issuing CA certificate:
+
+```powershell
+$env:CHAT_TLS_ENABLED = "1"
+$env:CHAT_TLS_CA_FILE = "C:\\chat\\server-ca.pem"
+python client.py
+```
+
+Production deployments must use a certificate issued by a trusted CA. Keeping the private key outside the repository and restricting its file permissions is required. Without certificate settings, the server intentionally remains in development plaintext mode for local compatibility.
+
 Run the automated test suite from the repository root:
 
 ```powershell

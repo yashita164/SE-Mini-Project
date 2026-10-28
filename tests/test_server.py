@@ -6,6 +6,9 @@ import socket
 
 import threading
 import time
+import ssl
+import shutil
+import subprocess
 from datetime import datetime
 
 import pytest
@@ -629,6 +632,42 @@ def test_successful_logout_closes_connection_and_removes_active_client(
 
         client.sock.settimeout(1.0)
         assert client.stream.readline() == b""
+
+
+def test_tls_handshake_round_trips_application_data(tmp_path, monkeypatch):
+    """TC-Sec-01: configured server accepts a TLS 1.2+ connection."""
+    openssl = shutil.which("openssl")
+    if openssl is None:
+        pytest.skip("OpenSSL executable is required for the TLS handshake test")
+
+    cert_file = tmp_path / "server-cert.pem"
+    key_file = tmp_path / "server-key.pem"
+    subprocess.run([
+        openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+        "-keyout", str(key_file), "-out", str(cert_file), "-days", "1",
+        "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1",
+    ], check=True, capture_output=True)
+
+    monkeypatch.setenv("CHAT_TLS_CERT_FILE", str(cert_file))
+    monkeypatch.setenv("CHAT_TLS_KEY_FILE", str(key_file))
+    test_server = server.ChatServer((HOST, 0), server.ChatHandler)
+    thread = threading.Thread(target=test_server.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        raw_socket = socket.create_connection(test_server.server_address, timeout=3)
+        context = ssl.create_default_context(cafile=str(cert_file))
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        tls_socket = context.wrap_socket(raw_socket, server_hostname="127.0.0.1")
+        tls_socket.sendall(b"{not valid json}\n")
+        response = receive_json(tls_socket, tls_socket.makefile("rb"))
+        assert response["type"] == "ERROR"
+        assert response["code"] == 400
+        tls_socket.close()
+    finally:
+        test_server.shutdown()
+        test_server.server_close()
+        thread.join(timeout=3)
 
 
 def test_silent_disconnect_is_removed_from_presence_and_session(
