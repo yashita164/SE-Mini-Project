@@ -33,35 +33,64 @@ def receive_json(sock, stream, timeout=SOCKET_TIMEOUT):
 
     """Receive one newline-delimited JSON response."""
 
-    sock.settimeout(timeout)
+    deadline = time.monotonic() + timeout
 
-    line = stream.readline()
+    while True:
 
-    if not line:
+        sock.settimeout(max(0.01, deadline - time.monotonic()))
 
-        raise AssertionError(
+        line = stream.readline()
 
-            "Server closed the connection unexpectedly."
+        if not line:
 
-        )
+            raise AssertionError(
 
-    return json.loads(line.decode("utf-8"))
+                "Server closed the connection unexpectedly."
+
+            )
+
+        response = json.loads(line.decode("utf-8"))
+
+        if response.get("type") == "PING":
+
+            sock.sendall(b'{"type":"PONG"}\n')
+
+            if time.monotonic() >= deadline:
+                raise AssertionError("Timed out while handling heartbeat messages.")
+
+            continue
+
+        return response
 
 def expect_no_message(sock, stream, timeout=0.3):
 
-    """Assert that no message arrives within the specified interval."""
+    """Assert that no message arrives within the specified interval, ignoring heartbeats."""
 
-    sock.settimeout(timeout)
+    deadline = time.monotonic() + timeout
 
-    try:
+    while True:
 
-        data = stream.readline()
+        sock.settimeout(max(0.01, deadline - time.monotonic()))
 
-    except socket.timeout:
+        try:
 
-        return
+            data = stream.readline()
 
-    if data:
+        except socket.timeout:
+
+            return
+
+        if not data:
+
+            return
+
+        message = json.loads(data.decode("utf-8"))
+
+        if message.get("type") == "PING":
+
+            sock.sendall(b'{"type":"PONG"}\n')
+
+            continue
 
         raise AssertionError(
 
@@ -528,8 +557,31 @@ def test_unauthenticated_message_is_rejected(running_server, token):
     [None, "invalid-token"],
     ids=["missing-token", "invalid-token"],
 )
+def test_history_requires_authentication(running_server, token):
+    """History requests require a valid session."""
+    with ChatTestClient(running_server) as client:
+        request = {"type": "HISTORY_REQUEST"}
+        if token is not None:
+            request["token"] = token
+        client.send(request)
+        response = client.receive()
+        assert response["type"] == "ERROR"
+        assert response["code"] == 401
 
-
+@pytest.mark.parametrize(
+    "request_type,response_type",
+    [
+        ("TYPING", "TYPING_RESPONSE"),
+        ("FILE_START", "FILE_ERROR"),
+        ("FILE_CHUNK", "FILE_ERROR"),
+        ("LOGOUT_REQUEST", "ERROR"),
+    ],
+)
+@pytest.mark.parametrize(
+    "token",
+    [None, "invalid-token"],
+    ids=["missing-token", "invalid-token"],
+)
 def test_session_token_is_required_for_protected_requests(
     running_server, request_type, response_type, token
 ):
