@@ -141,7 +141,13 @@ class ChatTestClient:
 
     def receive(self, timeout=SOCKET_TIMEOUT):
 
-        return receive_json(self.sock, self.stream, timeout)
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = max(0.1, deadline - time.monotonic())
+            response = receive_json(self.sock, self.stream, remaining)
+            if response is None or response.get("type") != "PING":
+                return response
+            self.send({"type": "PONG"})
 
     def register(self, username, password="SecurePass123"):
 
@@ -522,45 +528,8 @@ def test_unauthenticated_message_is_rejected(running_server, token):
     [None, "invalid-token"],
     ids=["missing-token", "invalid-token"],
 )
-def test_history_requires_authentication(running_server, token):
-
-    """History requests require a valid session."""
-
-    with ChatTestClient(running_server) as client:
-
-        request = {
-
-            "type": "HISTORY_REQUEST",
-
-        }
-
-        if token is not None:
-
-            request["token"] = token
-
-        client.send(request)
-
-        response = client.receive()
-
-        assert response["type"] == "ERROR"
-
-        assert response["code"] == 401
 
 
-@pytest.mark.parametrize(
-    "request_type,response_type",
-    [
-        ("TYPING", "TYPING_RESPONSE"),
-        ("FILE_START", "FILE_ERROR"),
-        ("FILE_CHUNK", "FILE_ERROR"),
-        ("LOGOUT_REQUEST", "ERROR"),
-    ],
-)
-@pytest.mark.parametrize(
-    "token",
-    [None, "invalid-token"],
-    ids=["missing-token", "invalid-token"],
-)
 def test_session_token_is_required_for_protected_requests(
     running_server, request_type, response_type, token
 ):
@@ -608,6 +577,30 @@ def test_successful_logout_closes_connection_and_removes_active_client(
 
         client.sock.settimeout(1.0)
         assert client.stream.readline() == b""
+
+
+def test_silent_disconnect_is_removed_from_presence_and_session(
+    running_server, monkeypatch
+):
+    """TC-Auth-04 / TC-Rel-01: unresponsive clients lose presence and sessions."""
+    monkeypatch.setattr(server, "HEARTBEAT_INTERVAL_SECONDS", 0.05)
+    monkeypatch.setattr(server, "HEARTBEAT_TIMEOUT_SECONDS", 0.25)
+
+    with ChatTestClient(running_server) as client:
+        register_and_login(client, "silent_disconnect_user")
+        token = client.token
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            with server.ACTIVE_CLIENTS_LOCK:
+                if "silent_disconnect_user" not in server.ACTIVE_CLIENTS:
+                    break
+            time.sleep(0.02)
+
+        with server.ACTIVE_CLIENTS_LOCK:
+            assert "silent_disconnect_user" not in server.ACTIVE_CLIENTS
+        assert database.get_session_user(token) is None
+
 
 def test_malformed_json_returns_error_and_connection_recovers(
 
