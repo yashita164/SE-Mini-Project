@@ -576,6 +576,39 @@ def test_session_token_is_required_for_protected_requests(
         assert response["type"] == response_type
         assert response["code"] == 401
 
+def test_successful_logout_closes_connection_and_removes_active_client(
+    running_server,
+):
+    """Successful logout closes the socket and removes the active client."""
+    with ChatTestClient(running_server) as client:
+        register_and_login(client, "logout_test_user")
+        token = client.token
+
+        with server.ACTIVE_CLIENTS_LOCK:
+            assert "logout_test_user" in server.ACTIVE_CLIENTS
+
+        client.send({
+            "type": "LOGOUT_REQUEST",
+            "token": token,
+        })
+
+        response = client.receive()
+        assert response["type"] == "LOGOUT_RESPONSE"
+        assert response["status"] == "OK"
+
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            with server.ACTIVE_CLIENTS_LOCK:
+                if "logout_test_user" not in server.ACTIVE_CLIENTS:
+                    break
+            time.sleep(0.01)
+
+        with server.ACTIVE_CLIENTS_LOCK:
+            assert "logout_test_user" not in server.ACTIVE_CLIENTS
+
+        client.sock.settimeout(1.0)
+        assert client.stream.readline() == b""
+
 def test_malformed_json_returns_error_and_connection_recovers(
 
     running_server,
