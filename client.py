@@ -20,7 +20,7 @@ HOST = "127.0.0.1"
 
 PORT = 5000
 
-MAX_RESPONSE_BYTES = 65_536
+MAX_RESPONSE_BYTES = 4_194_304  # 200 history entries with maximum-length UTF-8 content
 MAX_FILE_SIZE = 1024 * 1024  # 1 MiB; must match server.py
 FILE_CHUNK_SIZE = 8_192
 DOWNLOAD_DIR = Path("received_files")
@@ -79,6 +79,11 @@ def receive_messages(sock, responses, stop_event, send_lock=None):
                     continue
                 if kind in ("NEW_MESSAGE", "ROOM_EVENT"):
                     print(f"\n{format_incoming(message)}\n> ", end="", flush=True)
+                elif kind == "TYPING_INDICATOR":
+                    destination = message.get("roomId") or "private chat"
+                    action = "is typing" if message.get("isTyping") else "stopped typing"
+                    print(f"\n[{message.get('fromUser', 'Someone')} {action} in {destination}]\n> ",
+                          end="", flush=True)
                 elif kind == "ADMIN_ANNOUNCEMENT":
                     print(f"\n[Announcement from {message.get('adminId', 'administrator')}] "
                           f"{message.get('message', '')}\n> ", end="", flush=True)
@@ -91,7 +96,10 @@ def receive_messages(sock, responses, stop_event, send_lock=None):
                     size = message.get("size")
                     checksum = message.get("sha256")
                     if (not isinstance(transfer_id, str) or not isinstance(filename, str)
-                            or not filename or Path(filename).name != filename
+                            or not filename or filename in {".", ".."}
+                            or Path(filename).name != filename
+                            or "/" in filename or "\\" in filename or ":" in filename
+                            or any(ord(char) < 32 for char in filename)
                             or not isinstance(size, int) or isinstance(size, bool)
                             or size < 0 or size > MAX_FILE_SIZE
                             or not isinstance(checksum, str) or len(checksum) != 64):
@@ -135,7 +143,9 @@ def receive_messages(sock, responses, stop_event, send_lock=None):
                               f"({len(data)} bytes; SHA-256 verified)\n> ", end="", flush=True)
                     except OSError as error:
                         print(f"\n[Could not save received file: {error}]\n> ", end="", flush=True)
-                if kind not in ("NEW_MESSAGE", "ROOM_EVENT", "ADMIN_ANNOUNCEMENT",
+                if kind not in ("NEW_MESSAGE", "ROOM_EVENT", "TYPING_INDICATOR",
+                                "FILE_RECEIVE_START", "FILE_RECEIVE_CHUNK",
+                                "FILE_RECEIVE_END", "ADMIN_ANNOUNCEMENT",
                                 "ADMIN_MODERATION_NOTICE"):
                     responses.put(message)
     except (OSError, ConnectionError, ValueError):
@@ -429,15 +439,27 @@ def send_file(sock, send_lock, responses, stop_event, token, recipient, filepath
         if size > MAX_FILE_SIZE:
             print(f"File exceeds the configured limit ({MAX_FILE_SIZE} bytes / 1 MiB).")
             return
-        data = path.read_bytes()
+        with path.open("rb") as source:
+            data = source.read(MAX_FILE_SIZE + 1)
     except OSError as error:
         print(f"Could not read file: {error}")
+        return
+    if len(data) > MAX_FILE_SIZE:
+        print(f"File exceeds the configured limit ({MAX_FILE_SIZE} bytes / 1 MiB).")
         return
 
     transfer_id = str(uuid.uuid4())
     checksum = hashlib.sha256(data).hexdigest()
+    destination = recipient.strip()
+    destination_field = (
+        {"roomId": destination[1:]} if destination.startswith("#")
+        else {"toUser": destination}
+    )
+    if not destination_field.get("toUser", destination_field.get("roomId")):
+        print("A recipient username or room name is required.")
+        return
     send_json(sock, send_lock, {
-        "type": "FILE_START", "token": token, "toUser": recipient,
+        "type": "FILE_START", "token": token, **destination_field,
         "filename": path.name, "size": len(data), "sha256": checksum,
         "transferId": transfer_id,
     })
@@ -472,6 +494,20 @@ def send_file(sock, send_lock, responses, stop_event, token, recipient, filepath
             return
     print(f"File sent: {path.name} ({len(data)} bytes)")
     print(f"SHA-256: {checksum}")
+
+
+def send_typing_state(sock, send_lock, responses, stop_event, token,
+                      destination_type, destination, is_typing):
+    """Send a typing transition and consume its acknowledgement."""
+    send_json(sock, send_lock, {
+        "type": "TYPING", "token": token,
+        destination_type: destination, "isTyping": is_typing,
+    })
+    response = wait_for_response(
+        responses, "TYPING_RESPONSE", stop_event, timeout=2,
+    )
+    if response and response.get("status") == "ERROR":
+        display_response(response)
 
 
 def main():
@@ -530,7 +566,7 @@ def main():
 
     print("\n=== Team 5 TCP Chat ===")
 
-    print("Commands: register, login, msg, announce, kick, ban, history, logout, quit")
+    print("Commands: register, login, msg, file, announce, kick, ban, history, logout, quit")
 
     print("Rooms: create, join, leave, rooms, users, room")
 
@@ -624,7 +660,13 @@ def main():
 
                 recipient = input("Recipient username: ").strip()
 
-                content = input("Message: ")
+                send_typing_state(sock, send_lock, responses, stop_event,
+                                  token, "toUser", recipient, True)
+                try:
+                    content = input("Message: ")
+                finally:
+                    send_typing_state(sock, send_lock, responses, stop_event,
+                                      token, "toUser", recipient, False)
 
                 send_json(sock, send_lock, {
 
@@ -649,6 +691,14 @@ def main():
                 )
 
                 print(describe_message_result(response))
+            elif command == "file":
+                if not token:
+                    print("Log in first.")
+                    continue
+                destination = input("Recipient username or #room: ").strip()
+                filepath = input("File path: ").strip()
+                send_file(sock, send_lock, responses, stop_event,
+                          token, destination, filepath)
 
             elif command == "announce":
 
@@ -734,7 +784,13 @@ def main():
                         payload["room"] = room
                 elif command == "room":
                     room = input("Room: ").strip()
-                    content = input("Message: ")
+                    send_typing_state(sock, send_lock, responses, stop_event,
+                                      token, "roomId", room, True)
+                    try:
+                        content = input("Message: ")
+                    finally:
+                        send_typing_state(sock, send_lock, responses, stop_event,
+                                          token, "roomId", room, False)
                     send_json(sock, send_lock, {
                         "type": "SEND_MESSAGE", "token": token,
                         "roomId": room, "content": content,
@@ -764,41 +820,34 @@ def main():
 
                     continue
 
-                send_json(sock, send_lock, {
-
-                    "type": "HISTORY_REQUEST",
-
-                    "token": token,
-
-                })
-
-                response = wait_for_response(
-
-                    responses,
-
-                    "HISTORY_RESPONSE",
-
-                    stop_event,
-
-                )
+                history_pages = []
+                before_id = None
+                while True:
+                    request = {"type": "HISTORY_REQUEST", "token": token}
+                    if before_id is not None:
+                        request["beforeId"] = before_id
+                    send_json(sock, send_lock, request)
+                    response = wait_for_response(
+                        responses, "HISTORY_RESPONSE", stop_event,
+                    )
+                    if not response or response.get("type") != "HISTORY_RESPONSE":
+                        break
+                    history_pages.append(response.get("messages", []))
+                    before_id = response.get("nextBeforeId")
+                    if before_id is None:
+                        break
 
                 display_response(response)
 
-                if response:
-
-                    for item in response.get("messages", []):
-
-                        print(
-
-                            f"{item.get('sender', '?')} -> "
-
-                            f"{item.get('recipient', '?')}: "
-
-                            f"{item.get('content', '')} "
-
-                            f"({item.get('created_at', '')})"
-
-                        )
+                if history_pages:
+                    for page in reversed(history_pages):
+                        for item in page:
+                            print(
+                                f"{item.get('sender', '?')} -> "
+                                f"{item.get('recipient', '?')}: "
+                                f"{item.get('content', '')} "
+                                f"({item.get('created_at', '')})"
+                            )
 
             elif command == "logout":
 

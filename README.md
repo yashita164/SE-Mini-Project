@@ -192,3 +192,12 @@ restarts. Both commands accept an optional reason.
 Successful administrator announcements, kicks, and bans are recorded in the
 SQLite `admin_audit_log` table with the administrator username, UTC timestamp,
 action, target when applicable, and announcement text or moderation reason.
+
+## File transfers
+
+After logging in, use `file` and enter a recipient username or `#room`, followed
+by the local file path. Files are limited to 1 MiB; both client and server
+enforce this limit. Recipients receive files in `received_files/` after the
+SHA-256 checksum is verified. Room transfers reach online room members only,
+with membership checked again when delivery begins. Uploads expire after 120
+seconds without a valid chunk.
