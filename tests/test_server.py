@@ -121,6 +121,12 @@ def running_server(tmp_path, monkeypatch):
 
         server.ACTIVE_CLIENTS.clear()
 
+    with server.LOGIN_RATE_LOCK:
+
+        server.LOGIN_FAILURES_BY_IP.clear()
+
+        server.LOGIN_BLOCKED_UNTIL_BY_IP.clear()
+
     test_server = server.ChatServer(
 
         (HOST, 0), server.ChatHandler
@@ -152,6 +158,12 @@ def running_server(tmp_path, monkeypatch):
         with server.ACTIVE_CLIENTS_LOCK:
 
             server.ACTIVE_CLIENTS.clear()
+
+        with server.LOGIN_RATE_LOCK:
+
+            server.LOGIN_FAILURES_BY_IP.clear()
+
+            server.LOGIN_BLOCKED_UNTIL_BY_IP.clear()
 
 class ChatTestClient:
 
@@ -317,6 +329,39 @@ def test_server_rejects_invalid_login(running_server):
 
         # A rejected login closes the socket; the client must reconnect.
         assert client.stream.readline() == b""
+
+
+def test_tc_sec_05_login_attempts_are_rate_limited_per_ip(running_server):
+    """TC-Sec-05: repeated failed logins are blocked after five failures."""
+    for attempt in range(server.LOGIN_RATE_MAX_FAILURES):
+        with ChatTestClient(running_server) as client:
+            response = client.login("nobody", "WrongPass123")
+            assert response["code"] == 401
+
+    with ChatTestClient(running_server) as client:
+        response = client.login("nobody", "WrongPass123")
+        assert response["code"] == 429
+        assert response["status"] == "ERROR"
+        assert client.stream.readline() == b""
+
+
+def test_tc_sec_05_successful_login_clears_failure_tracking(running_server, monkeypatch):
+    """A successful login resets prior failures for its source IP."""
+    with ChatTestClient(running_server) as registration:
+        assert registration.register("rate_limit_alice", "Password123")["status"] == "OK"
+        assert registration.login("rate_limit_alice", "Password123")["status"] == "OK"
+
+    with server.LOGIN_RATE_LOCK:
+        server.LOGIN_FAILURES_BY_IP["127.0.0.1"] = [time.monotonic()] * 4
+        server.LOGIN_BLOCKED_UNTIL_BY_IP.pop("127.0.0.1", None)
+
+    with ChatTestClient(running_server) as client:
+        response = client.login("rate_limit_alice", "Password123")
+        assert response["status"] == "OK"
+
+    with server.LOGIN_RATE_LOCK:
+        assert "127.0.0.1" not in server.LOGIN_FAILURES_BY_IP
+        assert "127.0.0.1" not in server.LOGIN_BLOCKED_UNTIL_BY_IP
 
 def test_server_rejects_duplicate_registration(running_server):
 

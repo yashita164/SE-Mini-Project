@@ -21,6 +21,7 @@ import unicodedata
 import socketserver
 
 import threading
+import time
 
 from datetime import datetime, timezone
 
@@ -52,6 +53,49 @@ HEARTBEAT_TIMEOUT_SECONDS = 30.0
 HEARTBEAT_LAST_SEEN = {}
 HEARTBEAT_TOKENS = {}
 HEARTBEAT_LOCK = threading.Lock()
+
+LOGIN_RATE_MAX_FAILURES = max(1, int(os.getenv("CHAT_LOGIN_RATE_MAX_FAILURES", "5")))
+LOGIN_RATE_WINDOW_SECONDS = max(1.0, float(os.getenv("CHAT_LOGIN_RATE_WINDOW_SECONDS", "60")))
+LOGIN_RATE_LOCKOUT_SECONDS = max(1.0, float(os.getenv("CHAT_LOGIN_RATE_LOCKOUT_SECONDS", "60")))
+LOGIN_FAILURES_BY_IP = {}
+LOGIN_BLOCKED_UNTIL_BY_IP = {}
+LOGIN_RATE_LOCK = threading.Lock()
+
+
+def is_login_rate_limited(ip_address):
+    now = time.monotonic()
+    with LOGIN_RATE_LOCK:
+        blocked_until = LOGIN_BLOCKED_UNTIL_BY_IP.get(ip_address)
+        if blocked_until is not None:
+            if now < blocked_until:
+                return True
+            LOGIN_BLOCKED_UNTIL_BY_IP.pop(ip_address, None)
+            LOGIN_FAILURES_BY_IP.pop(ip_address, None)
+
+        cutoff = now - LOGIN_RATE_WINDOW_SECONDS
+        failures = [timestamp for timestamp in LOGIN_FAILURES_BY_IP.get(ip_address, []) if timestamp >= cutoff]
+        if failures:
+            LOGIN_FAILURES_BY_IP[ip_address] = failures
+        else:
+            LOGIN_FAILURES_BY_IP.pop(ip_address, None)
+        return False
+
+
+def record_failed_login(ip_address):
+    now = time.monotonic()
+    with LOGIN_RATE_LOCK:
+        cutoff = now - LOGIN_RATE_WINDOW_SECONDS
+        failures = [timestamp for timestamp in LOGIN_FAILURES_BY_IP.get(ip_address, []) if timestamp >= cutoff]
+        failures.append(now)
+        LOGIN_FAILURES_BY_IP[ip_address] = failures
+        if len(failures) >= LOGIN_RATE_MAX_FAILURES:
+            LOGIN_BLOCKED_UNTIL_BY_IP[ip_address] = now + LOGIN_RATE_LOCKOUT_SECONDS
+
+
+def clear_login_failures(ip_address):
+    with LOGIN_RATE_LOCK:
+        LOGIN_FAILURES_BY_IP.pop(ip_address, None)
+        LOGIN_BLOCKED_UNTIL_BY_IP.pop(ip_address, None)
 
 # Serialises "store + live-deliver" (sender side) against "register + replay
 # queued messages" (login side) so a message is never delivered twice and
@@ -396,6 +440,18 @@ class ChatHandler(socketserver.StreamRequestHandler):
 
     def handle_login(self, request):
 
+        ip_address = self.client_address[0] if isinstance(self.client_address, tuple) else str(self.client_address)
+
+        if is_login_rate_limited(ip_address):
+            self.reply({
+                "type": "LOGIN_RESPONSE",
+                "status": "ERROR",
+                "code": 429,
+                "message": "Too many login attempts. Try again later.",
+            })
+            self.close_after_request = True
+            return
+
         if self.username is not None:
 
             self.reply({
@@ -431,6 +487,7 @@ class ChatHandler(socketserver.StreamRequestHandler):
 
             self.close_after_request = True
 
+            record_failed_login(ip_address)
             return
 
         result = auth.login(
@@ -459,8 +516,10 @@ class ChatHandler(socketserver.StreamRequestHandler):
 
             self.close_after_request = True
 
+            record_failed_login(ip_address)
             return
 
+        clear_login_failures(ip_address)
         username = result["username"]
 
         token = result["token"]
