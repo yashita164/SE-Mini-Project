@@ -1,0 +1,8 @@
+{
+  "concurrent_clients": 200,
+  "configured_target": 200,
+  "stability_seconds": 5.0,
+  "active_sessions_verified": 200,
+  "dropped_sessions": 0,
+  "result": "PASS"
+}

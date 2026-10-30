@@ -692,6 +692,26 @@ def test_tc_perf_01_100_clients_p95_below_500ms(tmp_path):
     assert metadata["result"] == "PASS"
 
 
+def test_tc_scale_01_200_clients_remain_connected(tmp_path):
+    """TC-Scale-01: verify 200 concurrent authenticated sessions stay active."""
+    repository_root = Path(__file__).resolve().parents[1]
+    raw_output = tmp_path / "tc-scale-01-raw.csv"
+    completed = subprocess.run([
+        sys.executable,
+        str(repository_root / "scripts" / "measure_concurrent_clients.py"),
+        "--clients", "200",
+        "--stability-seconds", "2",
+        "--raw-output", str(raw_output),
+    ], cwd=repository_root, capture_output=True, text=True, timeout=300)
+
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+    metadata = json.loads(raw_output.with_suffix(".metadata.json").read_text(encoding="utf-8"))
+    assert metadata["concurrent_clients"] == 200
+    assert metadata["active_sessions_verified"] == 200
+    assert metadata["dropped_sessions"] == 0
+    assert metadata["result"] == "PASS"
+
+
 def test_silent_disconnect_is_removed_from_presence_and_session(
     running_server, monkeypatch
 ):
