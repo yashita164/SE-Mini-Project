@@ -61,7 +61,7 @@ All 115 automated tests pass on `main`. This does not mean every STP test case p
 | TC-Admin-01 | CHAT-F-040 | Passed | `test_tc_admin_01_*` |
 | TC-Admin-02 | CHAT-F-041 | Passed | `test_tc_admin_02_*` (server-wide only) |
 | TC-Admin-03 | CHAT-F-042 | Passed | `test_tc_admin_03_*` |
-| TC-Perf-01 | CHAT-NF-001 | Partly covered | One delivery is checked against 500 ms; the 95th percentile over a sample is not measured |
+| TC-Perf-01 | CHAT-NF-001 | Passed | `scripts/measure_message_latency.py` ran 100 concurrent clients and 1,000 private-message samples; raw results are in `docs/performance/tc-perf-01-raw.csv` and metadata in `docs/performance/tc-perf-01-raw.metadata.json` |
 | TC-Scale-01 | CHAT-NF-002 | Not executed | No load test for 200 clients |
 | TC-Rel-01 | CHAT-NF-003 | Passed | `test_silent_disconnect_is_removed_from_presence_and_session` verifies cleanup within the 30-second requirement |
 | TC-Ops-01 | CHAT-NF-004 | Not executed | No retention test; history returns the latest 50 |
@@ -72,11 +72,11 @@ All 115 automated tests pass on `main`. This does not mean every STP test case p
 | TC-Sec-04 | CHAT-SR-004 | Passed | `test_session_token_is_required_for_protected_requests`, token tests in `test_sr003_fuzz.py` |
 | TC-Sec-05 | CHAT-SR-005 | Not executed | Rate limiting not implemented |
 
-**Totals:** 29 STP test cases: 24 passed, 1 partly covered, 4 not executed.
+**Totals:** 29 STP test cases: 25 passed, 0 partly covered, 4 not executed.
 
 ## 5. Test cases not executed
 
-`TC-Auth-03`, `TC-Scale-01`, `TC-Ops-01` and `TC-Sec-05` have no implemented test, because the feature behind them is missing or incomplete (see docs/deviations.md). `TC-Perf-01` has a test, but it does not measure the 95th-percentile target.
+`TC-Auth-03`, `TC-Scale-01`, `TC-Ops-01` and `TC-Sec-05` have no implemented test, because the feature behind them is missing or incomplete (see docs/deviations.md).
 
 ## 6. Defect summary
 
