@@ -44,7 +44,7 @@ The SRS sample RTM used `N` without defining it. It is treated here as "not yet 
 | CHAT-F-041 | Kick / ban | TC-Admin-02 | `test_tc_admin_02_*` (server-wide only, see deviations) | P |
 | CHAT-F-042 | Log admin actions | TC-Admin-03 | `test_tc_admin_03_*` | P |
 | CHAT-NF-001 | Latency ≤ 500 ms at p95 | TC-Perf-01 | `scripts/measure_message_latency.py` load result: 100 clients, 1,000 samples, p95 23.461 ms | P |
-| CHAT-NF-002 | 200 concurrent clients | TC-Scale-01 | No load test | NI |
+| CHAT-NF-002 | 200 concurrent clients | TC-Scale-01 | `scripts/measure_concurrent_clients.py`: 200 clients, 200 active sessions, 0 dropped | P |
 | CHAT-NF-003 | Dead-connection cleanup within 30 s | TC-Rel-01 | `test_silent_disconnect_is_removed_from_presence_and_session` | I |
 | CHAT-NF-004 | 90-day history retention | TC-Ops-01 | No retention test; history request returns the latest 50 | NI |
 | CHAT-NF-005 | Responsive UI during socket I/O | TC-UX-01 | `test_tc_ux_01_user_can_send_while_receiver_waits_on_slow_network` | P |
@@ -54,12 +54,11 @@ The SRS sample RTM used `N` without defining it. It is treated here as "not yet 
 | CHAT-SR-004 | Session tokens | TC-Sec-04 | `test_session_token_is_required_for_protected_requests`, token tests in `test_sr003_fuzz.py` | P |
 | CHAT-SR-005 | Per-IP rate limiting | TC-Sec-05 | Not implemented | NI |
 
-**Totals:** 29 requirements: 21 P, 1 NR, 7 NI, 0 F, 0 B.
+**Totals:** 29 requirements: 22 P, 0 NR, 7 NI, 0 F, 0 B.
 
 ## Test cases still open
 
 - `TC-Auth-03` logout closing the socket: not implemented (defect D-06).
-- `TC-Scale-01` 200 concurrent clients: no load test written.
 - `TC-Ops-01` 90-day retention: messages are kept but only the latest 50 are returned; no retention test.
 - `TC-Sec-05` rate limiting: not implemented (recorded in docs/deviations.md).
 

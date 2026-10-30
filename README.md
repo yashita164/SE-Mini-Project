@@ -139,6 +139,16 @@ python scripts/measure_message_latency.py --clients 100 --samples-per-client 10 
 
 The script prints the p95 latency and exits nonzero if the p95 exceeds 500 ms. Raw samples and run metadata are written beside the requested CSV path. No defect is logged unless the measured p95 misses the target.
 
+### Concurrent client load test
+
+Run TC-Scale-01 with 200 authenticated clients:
+
+```powershell
+python scripts/measure_concurrent_clients.py --clients 200 --stability-seconds 5 --raw-output docs/performance/tc-scale-01-raw.csv
+```
+
+The script verifies every login session remains active after the stability period and exits nonzero if any connection drops.
+
 GitHub Actions runs this same command on every push and pull request using
 Python 3.13.
 
