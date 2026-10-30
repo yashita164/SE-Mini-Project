@@ -1,6 +1,7 @@
 """Database-level tests for the offline message queue (TC-Msg-03)."""
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 import database
 
@@ -91,4 +92,77 @@ def test_msg_03_existing_database_is_migrated_without_replaying_history(
 
     assert [m["content"] for m in database.get_pending_messages("bob")] == [
         "new message"
+    ]
+
+
+def test_history_includes_messages_through_the_90_day_boundary(
+    monkeypatch, tmp_path
+):
+    """History includes the full 90-day window and preserves chronological order."""
+    use_temp_database(monkeypatch, tmp_path)
+    database.init_db()
+
+    fixed_now = datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now if tz else fixed_now.replace(tzinfo=None)
+
+    monkeypatch.setattr(database, "datetime", FrozenDateTime)
+    messages = [
+        ("today", 0, 0),
+        ("older than 30 days", 31, 0),
+        ("older than 60 days", 61, 0),
+        ("within 90 days", 89, 23 * 60 + 59),
+        ("at 90-day boundary", 90, 0),
+        ("outside 90 days", 90, 0),
+    ]
+    ids = []
+    for content, days_ago, minutes_ago in messages:
+        message_id = database.save_message("alice", "bob", content)
+        ids.append(message_id)
+        created_at = fixed_now - timedelta(days=days_ago, minutes=minutes_ago)
+        if content == "outside 90 days":
+            created_at -= timedelta(seconds=1)
+        with database.get_connection() as connection:
+            connection.execute(
+                "UPDATE messages SET created_at = ? WHERE id = ?",
+                (created_at.strftime("%Y-%m-%d %H:%M:%S"), message_id),
+            )
+
+    history = database.get_messages_for("alice", limit=20)
+    assert [message["content"] for message in history] == [
+        "at 90-day boundary",
+        "within 90 days",
+        "older than 60 days",
+        "older than 30 days",
+        "today",
+    ]
+    assert [message["id"] for message in history] == [
+        ids[4], ids[3], ids[2], ids[1], ids[0]
+    ]
+
+
+def test_history_pages_do_not_skip_or_repeat_messages(monkeypatch, tmp_path):
+    """History pages can reach older records while remaining chronological."""
+    use_temp_database(monkeypatch, tmp_path)
+    database.init_db()
+    ids = [
+        database.save_message("alice", "bob", f"message {index}")
+        for index in range(5)
+    ]
+
+    first_page = database.get_messages_for("alice", limit=2)
+    second_page = database.get_messages_for(
+        "alice", limit=2, before_id=first_page[0]["id"]
+    )
+    third_page = database.get_messages_for(
+        "alice", limit=2, before_id=second_page[0]["id"]
+    )
+
+    result = third_page + second_page + first_page
+    assert [message["id"] for message in result] == ids
+    assert [message["content"] for message in result] == [
+        f"message {index}" for index in range(5)
     ]

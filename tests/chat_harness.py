@@ -81,6 +81,8 @@ def chat_port(tmp_path, monkeypatch):
     monkeypatch.setattr(auth.bcrypt, "gensalt", lambda: real_gensalt(rounds=4))
     database.init_db()
     server.ACTIVE_CLIENTS.clear()
+    server.TYPING_STATES.clear()
+    server.ACTIVE_FILE_TRANSFERS.clear()
 
     srv = server.ChatServer(("127.0.0.1", 0), server.ChatHandler)
     thread = threading.Thread(target=lambda: srv.serve_forever(poll_interval=0.05), daemon=True)
