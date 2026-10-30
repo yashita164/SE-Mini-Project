@@ -1,0 +1,7 @@
+{
+  "concurrent_clients": 100,
+  "sample_count": 1000,
+  "p95_latency_ms": 23.461,
+  "target_ms": 500.0,
+  "result": "PASS"
+}

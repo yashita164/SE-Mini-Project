@@ -43,7 +43,7 @@ The SRS sample RTM used `N` without defining it. It is treated here as "not yet 
 | CHAT-F-040 | Admin announcement | TC-Admin-01 | `test_tc_admin_01_*` | P |
 | CHAT-F-041 | Kick / ban | TC-Admin-02 | `test_tc_admin_02_*` (server-wide only, see deviations) | P |
 | CHAT-F-042 | Log admin actions | TC-Admin-03 | `test_tc_admin_03_*` | P |
-| CHAT-NF-001 | Latency ≤ 500 ms at p95 | TC-Perf-01 | One delivery is checked against 500 ms; p95 over a sample is not measured | NR |
+| CHAT-NF-001 | Latency ≤ 500 ms at p95 | TC-Perf-01 | `scripts/measure_message_latency.py` load result: 100 clients, 1,000 samples, p95 23.461 ms | P |
 | CHAT-NF-002 | 200 concurrent clients | TC-Scale-01 | No load test | NI |
 | CHAT-NF-003 | Dead-connection cleanup within 30 s | TC-Rel-01 | `test_silent_disconnect_is_removed_from_presence_and_session` | I |
 | CHAT-NF-004 | 90-day history retention | TC-Ops-01 | No retention test; history request returns the latest 50 | NI |
@@ -62,7 +62,6 @@ The SRS sample RTM used `N` without defining it. It is treated here as "not yet 
 - `TC-Scale-01` 200 concurrent clients: no load test written.
 - `TC-Ops-01` 90-day retention: messages are kept but only the latest 50 are returned; no retention test.
 - `TC-Sec-05` rate limiting: not implemented (recorded in docs/deviations.md).
-- `TC-Perf-01` latency: the current test checks one delivery against 500 ms; the 95th-percentile target over a sample is not measured (status NR).
 
 ## Evidence and completion checklist (issues #12 and #7)
 

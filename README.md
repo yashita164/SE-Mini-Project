@@ -129,6 +129,16 @@ Run the automated test suite from the repository root:
 python -m pytest -v
 ```
 
+### Message latency load test
+
+Run TC-Perf-01 with 100 concurrent clients and 1,000 messages:
+
+```powershell
+python scripts/measure_message_latency.py --clients 100 --samples-per-client 10 --raw-output docs/performance/tc-perf-01-raw.csv
+```
+
+The script prints the p95 latency and exits nonzero if the p95 exceeds 500 ms. Raw samples and run metadata are written beside the requested CSV path. No defect is logged unless the measured p95 misses the target.
+
 GitHub Actions runs this same command on every push and pull request using
 Python 3.13.
 

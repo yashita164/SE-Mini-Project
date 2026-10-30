@@ -9,6 +9,8 @@ import time
 import ssl
 import shutil
 import subprocess
+import sys
+from pathlib import Path
 from datetime import datetime
 
 import pytest
@@ -668,6 +670,26 @@ def test_tls_handshake_round_trips_application_data(tmp_path, monkeypatch):
         test_server.shutdown()
         test_server.server_close()
         thread.join(timeout=3)
+
+
+def test_tc_perf_01_100_clients_p95_below_500ms(tmp_path):
+    """TC-Perf-01: run the load script with 100 clients and verify p95 latency."""
+    repository_root = Path(__file__).resolve().parents[1]
+    raw_output = tmp_path / "tc-perf-01-raw.csv"
+    completed = subprocess.run([
+        sys.executable,
+        str(repository_root / "scripts" / "measure_message_latency.py"),
+        "--clients", "100",
+        "--samples-per-client", "1",
+        "--raw-output", str(raw_output),
+    ], cwd=repository_root, capture_output=True, text=True, timeout=120)
+
+    assert completed.returncode == 0, completed.stderr or completed.stdout
+    metadata = json.loads(raw_output.with_suffix(".metadata.json").read_text(encoding="utf-8"))
+    assert metadata["concurrent_clients"] == 100
+    assert metadata["sample_count"] == 100
+    assert metadata["p95_latency_ms"] <= metadata["target_ms"]
+    assert metadata["result"] == "PASS"
 
 
 def test_silent_disconnect_is_removed_from_presence_and_session(
