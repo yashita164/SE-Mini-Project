@@ -149,6 +149,18 @@ python scripts/measure_concurrent_clients.py --clients 200 --stability-seconds 5
 
 The script verifies every login session remains active after the stability period and exits nonzero if any connection drops.
 
+### Login rate limiting
+
+The server rejects rapid failed login attempts from the same source IP. The default limit is 5 failures in 60 seconds, followed by a 60-second lockout. A successful login clears the IP's failure state. Configuration is available through:
+
+```powershell
+$env:CHAT_LOGIN_RATE_MAX_FAILURES = "5"
+$env:CHAT_LOGIN_RATE_WINDOW_SECONDS = "60"
+$env:CHAT_LOGIN_RATE_LOCKOUT_SECONDS = "60"
+```
+
+Throttled connections receive `LOGIN_RESPONSE` with code `429` and are closed.
+
 GitHub Actions runs this same command on every push and pull request using
 Python 3.13.
 

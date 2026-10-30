@@ -52,15 +52,15 @@ The SRS sample RTM used `N` without defining it. It is treated here as "not yet 
 | CHAT-SR-002 | Password hashing | TC-Sec-02 | `test_sec_02_*` in `test_auth.py` and `test_server.py` | P |
 | CHAT-SR-003 | Input validation | TC-Sec-03 | `test_sr003_fuzz.py` (37 tests) and `test_malformed_json_returns_error_and_connection_recovers` | P |
 | CHAT-SR-004 | Session tokens | TC-Sec-04 | `test_session_token_is_required_for_protected_requests`, token tests in `test_sr003_fuzz.py` | P |
-| CHAT-SR-005 | Per-IP rate limiting | TC-Sec-05 | Not implemented | NI |
+| CHAT-SR-005 | Per-IP rate limiting | TC-Sec-05 | `test_tc_sec_05_login_attempts_are_rate_limited_per_ip`, `test_tc_sec_05_successful_login_clears_failure_tracking` | P |
 
-**Totals:** 29 requirements: 22 P, 0 NR, 7 NI, 0 F, 0 B.
+**Totals:** 29 requirements: 23 P, 0 NR, 6 NI, 0 F, 0 B.
 
 ## Test cases still open
 
 - `TC-Auth-03` logout closing the socket: not implemented (defect D-06).
 - `TC-Ops-01` 90-day retention: messages are kept but only the latest 50 are returned; no retention test.
-- `TC-Sec-05` rate limiting: not implemented (recorded in docs/deviations.md).
+- `TC-Sec-05` verifies failed-login throttling and successful-login state reset per source IP.
 
 ## Evidence and completion checklist (issues #12 and #7)
 

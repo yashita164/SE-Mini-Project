@@ -70,13 +70,13 @@ All 115 automated tests pass on `main`. This does not mean every STP test case p
 | TC-Sec-02 | CHAT-SR-002 | Passed | `test_sec_02_*` |
 | TC-Sec-03 | CHAT-SR-003 | Passed | `test_sr003_fuzz.py` and `test_malformed_json_returns_error_and_connection_recovers` |
 | TC-Sec-04 | CHAT-SR-004 | Passed | `test_session_token_is_required_for_protected_requests`, token tests in `test_sr003_fuzz.py` |
-| TC-Sec-05 | CHAT-SR-005 | Not executed | Rate limiting not implemented |
+| TC-Sec-05 | CHAT-SR-005 | Passed | `test_tc_sec_05_login_attempts_are_rate_limited_per_ip` and `test_tc_sec_05_successful_login_clears_failure_tracking` |
 
-**Totals:** 29 STP test cases: 26 passed, 0 partly covered, 3 not executed.
+**Totals:** 29 STP test cases: 27 passed, 0 partly covered, 2 not executed.
 
 ## 5. Test cases not executed
 
-`TC-Auth-03`, `TC-Ops-01` and `TC-Sec-05` have no implemented test, because the feature behind them is missing or incomplete (see docs/deviations.md).
+`TC-Auth-03` and `TC-Ops-01` have no implemented test, because the feature behind them is missing or incomplete (see docs/deviations.md).
 
 ## 6. Defect summary
 
