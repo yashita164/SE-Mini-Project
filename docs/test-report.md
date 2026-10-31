@@ -10,26 +10,26 @@
 |---|---|
 | Test framework | pytest 9.1.0 |
 | Command | `python -m pytest -v` |
-| Tests collected | 115 |
-| Passed | 115 |
+| Tests collected | 148 |
+| Passed | 148 |
 | Failed | 0 |
 | Skipped | 0 |
-| Execution date | 28 October 2026 |
+| Execution date | 31 October 2026 |
 | Environment | GitHub Actions (ubuntu-latest), Python 3.13; also run locally on Python 3.13 |
-| CI run | https://github.com/yashita164/SE-Mini-Project/actions/runs/40567424923 |
+| CI run | [https://github.com/yashita164/SE-Mini-Project/actions/runs/40567424923](https://github.com/yashita164/SE-Mini-Project/actions/runs/41162261396) |
 
-All 115 automated tests pass on `main`. This does not mean every STP test case passed: some STP test cases have no implemented test or are only partly covered. They are listed explicitly in sections 4 and 5.
+All 148 automated tests pass on `main`. Every one of the 29 STP test cases has an executed test or measurement (section 4). TC-Perf-01 and TC-Scale-01 are verified by the measurement scripts in `scripts/`, not by pytest.
 
 ## 2. Test files
 
 | File | Tests | Area |
 |---|---|---|
 | `tests/test_auth.py` | 9 | Registration, login, password hashing |
-| `tests/test_client.py` | 1 | Client responsiveness during socket I/O |
-| `tests/test_database.py` | 4 | Offline-message queue and database migration |
+| `tests/test_client.py` | 4 | Client responsiveness during socket I/O |
+| `tests/test_database.py` | 6 | Offline-message queue and database migration |
 | `tests/test_f013_delivery_ack.py` | 4 | Delivery acknowledgement |
-| `tests/test_rooms.py` | 21 | Chat rooms, room broadcast, online-user lists |
-| `tests/test_server.py` | 39 | Server integration: messaging, history, typing, files, sessions, administration |
+| `tests/test_rooms.py` | 23 | Chat rooms, room broadcast, online-user lists |
+| `tests/test_server.py` | 65 | Server integration: messaging, history, typing, files, sessions, administration |
 | `tests/test_sr003_fuzz.py` | 37 | Malformed-payload fuzzing and input validation |
 
 ## 3. Method notes
@@ -44,7 +44,7 @@ All 115 automated tests pass on `main`. This does not mean every STP test case p
 |---|---|---|---|
 | TC-Auth-01 | CHAT-F-001 | Passed | `test_auth.py` (`test_auth_01_*`) and server registration tests |
 | TC-Auth-02 | CHAT-F-002 | Passed | `test_auth_02_*`, `test_server_rejects_invalid_login` |
-| TC-Auth-03 | CHAT-F-003 | Not executed | No test; logout leaves the socket open (defect D-06) |
+| TC-Auth-03 | CHAT-F-003 | Passed | `test_successful_logout_closes_connection_and_removes_active_client` |
 | TC-Auth-04 | CHAT-F-004 | Passed | `test_silent_disconnect_is_removed_from_presence_and_session` |
 | TC-Msg-01 | CHAT-F-010 | Passed | `test_private_message_reaches_only_recipient` |
 | TC-Msg-02 | CHAT-F-011 | Passed | `test_tc_msg_02_real_time_delivery_within_latency_target` |
@@ -64,7 +64,7 @@ All 115 automated tests pass on `main`. This does not mean every STP test case p
 | TC-Perf-01 | CHAT-NF-001 | Passed | `scripts/measure_message_latency.py` ran 100 concurrent clients and 1,000 private-message samples; raw results are in `docs/performance/tc-perf-01-raw.csv` and metadata in `docs/performance/tc-perf-01-raw.metadata.json` |
 | TC-Scale-01 | CHAT-NF-002 | Passed | `scripts/measure_concurrent_clients.py` verified 200 authenticated clients remained active with zero dropped sessions |
 | TC-Rel-01 | CHAT-NF-003 | Passed | `test_silent_disconnect_is_removed_from_presence_and_session` verifies cleanup within the 30-second requirement |
-| TC-Ops-01 | CHAT-NF-004 | Not executed | No retention test; history returns the latest 50 |
+| TC-Ops-01 | CHAT-NF-004 | Passed | `test_history_includes_messages_through_the_90_day_boundary`, `test_history_request_pages_messages_across_the_90_day_window` |
 | TC-UX-01 | CHAT-NF-005 | Passed | `tests/test_client.py` |
 | TC-Sec-01 | CHAT-SR-001 | Passed | `test_tls_handshake_round_trips_application_data` |
 | TC-Sec-02 | CHAT-SR-002 | Passed | `test_sec_02_*` |
@@ -72,26 +72,26 @@ All 115 automated tests pass on `main`. This does not mean every STP test case p
 | TC-Sec-04 | CHAT-SR-004 | Passed | `test_session_token_is_required_for_protected_requests`, token tests in `test_sr003_fuzz.py` |
 | TC-Sec-05 | CHAT-SR-005 | Passed | `test_tc_sec_05_login_attempts_are_rate_limited_per_ip` and `test_tc_sec_05_successful_login_clears_failure_tracking` |
 
-**Totals:** 29 STP test cases: 27 passed, 0 partly covered, 2 not executed.
+**Totals:** 29 STP test cases: 29 passed, 0 partly covered, 0 not executed.
 
 ## 5. Test cases not executed
 
-`TC-Auth-03` and `TC-Ops-01` have no implemented test, because the feature behind them is missing or incomplete (see docs/deviations.md).
+None. All 29 STP test cases have an executed test or measurement. TC-Perf-01 (100 clients, 1,000 latency samples) and TC-Scale-01 (200 concurrent clients) are verified by `scripts/measure_message_latency.py` and `scripts/measure_concurrent_clients.py`; their raw results are in `docs/performance/`.
 
 ## 6. Defect summary
 
-Seven defects were logged in the [defect log](defect-log.md): 1 High, 2 Medium and 4 Low. Four were fixed during Sprint 2 and three remain open. No Critical defects were found.
+Seven defects were logged in the [defect log](defect-log.md): 1 High, 2 Medium and 4 Low. All seven are fixed. No Critical defects were found.
 
 | ID | Summary | Severity | Owner | Status | Fix / evidence |
 |---|---|---|---|---|---|
-| D-01 | Client `file` command is not connected, so files cannot be sent from the console client | High | Unassigned | Open | `send_file()` exists in `client.py` but `main()` never calls it |
+| D-01 | Client `file` command was not connected, so files could not be sent from the console client | High | Yashita Anand | Fixed | PR #67 (the `file` command now sends to a user or a `#room`) |
 | D-02 | Every private message was printed twice | Low | Sakshi | Fixed | PR #59 |
 | D-03 | `FILE_CHUNK` with a non-string transfer ID ended the connection's handler thread | Medium | Sakshi | Fixed | PR #51; `test_file_chunk_with_non_string_transfer_id` |
 | D-04 | Control characters accepted in messages and file names | Low | Sakshi | Fixed | PR #51; `test_send_message_validation` |
 | D-05 | NUL character accepted in passwords | Medium | Sakshi | Fixed | PR #51; fuzz case "register NUL in password" |
-| D-06 | Logout does not close the socket (CHAT-F-003) | Low | Unassigned | Open | Found by reading `handle_logout` |
-| D-07 | One team member's SRN is missing an `S` in the README | Low | Unassigned | Open | README team table |
+| D-06 | Logout did not close the socket (CHAT-F-003) | Low | Ujwal K | Fixed | PR #61; `test_successful_logout_closes_connection_and_removes_active_client` |
+| D-07 | One team member's SRN was missing an `S` in the README | Low | Sakshi | Fixed | This documentation PR (README team table) |
 
 ## 7. Conclusion
 
-All 115 automated tests pass on `main`. 21 of 29 STP test cases pass, one is only partly covered, and seven were not executed because the feature was not built or implemented within the two sprints. Three low-to-high severity defects remain open and are tracked in the defect log.
+All 148 automated tests pass on `main`, and all 29 STP test cases have been executed and passed: 27 by automated tests and two (TC-Perf-01 and TC-Scale-01) by measurement scripts. All seven logged defects are fixed.
