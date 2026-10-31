@@ -64,7 +64,7 @@ The complete **Software Requirements Specification (SRS)** includes:
 |---|---|
 | Sakshi Srinivas Ghodke | PES2UG24CS914 |
 | Yashita Anand | PES2UG24CS613 |
-| Ujwal K | PES2UG24C566 |
+| Ujwal K | PES2UG24CS566 |
 | Varun Sahu | PES2UG24CS576 |
 
 ## Project Information
@@ -183,8 +183,8 @@ currently connected clients.
 
 ## Server-wide moderation
 
-This version does not implement chat rooms, so moderation currently applies to
-the entire server. An administrator can use `kick` to disconnect an online
+Moderation applies to the entire server; there is no per-room moderation. An
+administrator can use `kick` to disconnect an online
 user or `ban` to persist a server-wide ban and disconnect that user if online.
 Banned users are refused at their next login, including after the server
 restarts. Both commands accept an optional reason.
@@ -192,6 +192,26 @@ restarts. Both commands accept an optional reason.
 Successful administrator announcements, kicks, and bans are recorded in the
 SQLite `admin_audit_log` table with the administrator username, UTC timestamp,
 action, target when applicable, and announcement text or moderation reason.
+
+## Chat rooms
+
+Clients can create and join named rooms and exchange messages with the other
+members who are online. Room commands in the client:
+
+| Command | What it does |
+|---|---|
+| `create` | Prompts for a room name, creates the room and joins it |
+| `join` | Prompts for a room name and joins an existing room |
+| `leave` | Prompts for a room name and leaves it |
+| `rooms` | Lists existing rooms |
+| `users` | Lists everyone online; enter a room name at the prompt to list that room's members (you must be a member) |
+| `room` | Prompts for a room name and a message, then sends it to every online member |
+
+Room names are 3–32 characters (letters, digits, `_` and `-`) and are
+case-insensitive. Rooms are held in server memory, so they are cleared when the
+server restarts, and room messages are delivered only to members who are
+online. A file can be sent to a room with `file` using `#room` as the target
+(for example `#general`) instead of a username.
 
 ## File transfers
 
