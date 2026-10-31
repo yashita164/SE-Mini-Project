@@ -14,9 +14,9 @@
 | Passed | 148 |
 | Failed | 0 |
 | Skipped | 0 |
-| Execution date | 31 October 2026 |
+| Execution date | 30 October 2026 |
 | Environment | GitHub Actions (ubuntu-latest), Python 3.13; also run locally on Python 3.13 |
-| CI run | [https://github.com/yashita164/SE-Mini-Project/actions/runs/40567424923](https://github.com/yashita164/SE-Mini-Project/actions/runs/41162261396) |
+| CI run | https://github.com/yashita164/SE-Mini-Project/actions/runs/41093000428 |
 
 All 148 automated tests pass on `main`. Every one of the 29 STP test cases has an executed test or measurement (section 4). TC-Perf-01 and TC-Scale-01 are verified by the measurement scripts in `scripts/`, not by pytest.
 
