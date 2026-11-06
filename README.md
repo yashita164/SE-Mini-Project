@@ -164,6 +164,74 @@ Throttled connections receive `LOGIN_RESPONSE` with code `429` and are closed.
 GitHub Actions runs this same command on every push and pull request using
 Python 3.13.
 
+## Tkinter desktop GUI
+
+The GUI foundation lives in `gui/`: `app.py` owns the Tk window and navigation,
+`client_core.py` is the shared TCP client, and `dashboard.py` displays online
+users, rooms and connection status. Tkinter is part of the Python standard
+library and adds no package to `requirements.txt`; install a Python build that
+includes Tcl/Tk.
+
+Start `server.py` in one terminal as described above, then launch the GUI from
+the repository root in another terminal:
+
+```powershell
+python -m gui.app
+```
+
+The shared client speaks the server's newline-delimited UTF-8 JSON protocol.
+It reads responses on a background thread and places protocol events in a
+`queue.Queue`; the Tk application drains that queue with `root.after()` and
+updates widgets only on the main thread. The same client layer supports
+registration/login, private and room messaging, room/user lists, paginated
+history, typing indicators and both directions of the existing file-transfer
+protocol. Received files are size/checksum verified and saved under
+`received_files/`. It honors the existing `CHAT_TLS_ENABLED` and
+`CHAT_TLS_CA_FILE` client settings.
+
+The GUI is being integrated in modules by the team. `gui.auth_view.AuthView`
+and the private-chat, room-chat and file screens are extension points and may
+not yet be present. Until those modules are integrated, the app shows an
+authentication placeholder and chat-screen placeholders; the dashboard and
+shared client API are available for their implementation. The backend has no
+push notification for changes to the global online-user list, so the dashboard
+refreshes it periodically. Unexpected disconnections are reported; automatic
+reconnection is not implemented. The server closes a connection after failed
+login, so the authentication view must reconnect before another attempt.
+
+`ClientCore` is the integration surface for screens:
+
+- `connect()` starts connecting in the background. Read `connection_state`,
+  `is_connected`, `is_authenticated` and `username` for current state.
+- `register(username, password)` and `login(username, password)` send the
+  existing authentication requests.
+- `send_private_message(recipient, content)` and
+  `send_room_message(room, content)` use the existing `SEND_MESSAGE` format.
+- `create_room(room)`, `join_room(room)`, `leave_room(room)`, `list_rooms()`
+  and `list_users(room=None)` expose the backend's room and presence requests.
+- `request_history(limit=50, before_id=None)` requests one history page;
+  `nextBeforeId` in the `HISTORY_RESPONSE` is the cursor for the next older
+  page.
+- `send_typing(destination, is_typing, room=False)` and
+  `send_file(destination, filepath)` expose the existing typing and transfer
+  protocols. File sends run in a worker; received files are verified and
+  reported through a `file_transfer` event with the saved path.
+- `logout()` requests logout and `close()` shuts down the connection. Consume
+  server responses and local lifecycle/error events from `client.events`.
+
+Server messages are queued unchanged as dictionaries with a `type`.
+Client-generated events use `_event`: `connection`, `client_error` or
+`file_transfer`. Screens should implement `handle_event(event)` and let the app
+deliver queued events; they must not read the socket or update Tk widgets from
+worker threads.
+
+The app loads optional teammate views using these contracts: `gui.auth_view`
+exports `AuthView(parent=..., client=..., on_authenticated=...)`;
+`gui.private_chat` exports `PrivateChatView(parent=..., client=..., target=...,
+on_back=...)`; `gui.room_chat` exports `RoomChatView` with the same feature-view
+arguments; and `gui.files` may export `FilesView` with those arguments.
+Factories can also be passed directly to `ChatApplication`.
+
 ## Administrator announcements
 
 Administrators are identified by their exact registered usernames in the
