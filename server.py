@@ -1907,7 +1907,9 @@ class ChatServer(socketserver.ThreadingTCPServer):
 
     allow_reuse_address = True
 
-    daemon_threads = True
+    daemon_threads = False
+
+    block_on_close = True
 
     def __init__(self, server_address, request_handler_class):
         super().__init__(server_address, request_handler_class)
