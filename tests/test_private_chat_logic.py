@@ -1,5 +1,7 @@
 """Tests for the private chat display logic (no Tkinter or server needed)."""
 
+from datetime import datetime, timezone
+
 from gui.private_chat_logic import (
     ack_text,
     format_history_row,
@@ -10,6 +12,12 @@ from gui.private_chat_logic import (
     rows_for_conversation,
     short_time,
 )
+
+
+def local(hour, minute):
+    """Local HH:MM for 2026-11-10 hour:minute UTC (works in any time zone)."""
+    utc = datetime(2026, 11, 10, hour, minute, tzinfo=timezone.utc)
+    return utc.astimezone().strftime("%H:%M")
 
 
 def row(msg_id, sender, recipient, content="hi", created="2026-11-10 09:05:00"):
@@ -36,19 +44,19 @@ def test_rows_for_conversation_keeps_only_this_pair():
 
 
 def test_short_time_accepts_both_timestamp_styles_and_bad_input():
-    assert short_time("2026-11-10 09:05:00") == "09:05"
-    assert short_time("2026-11-10T09:05:00+00:00") == "09:05"
+    assert short_time("2026-11-10 09:05:00") == local(9, 5)
+    assert short_time("2026-11-10T09:05:00+00:00") == local(9, 5)
     assert short_time("garbage") == "--:--"
     assert short_time(None) == "--:--"
 
 
 def test_format_line_marks_own_messages_as_you():
-    assert format_line("alice", "hello", "2026-11-10 09:05:00", "alice") == "[09:05] You: hello"
-    assert format_line("bob", "hello", "2026-11-10 09:05:00", "alice") == "[09:05] bob: hello"
+    assert format_line("alice", "hello", "2026-11-10 09:05:00", "alice") == f"[{local(9, 5)}] You: hello"
+    assert format_line("bob", "hello", "2026-11-10 09:05:00", "alice") == f"[{local(9, 5)}] bob: hello"
 
 
 def test_format_history_row_handles_missing_fields():
-    assert format_history_row(row(1, "bob", "alice", "yo"), "alice") == "[09:05] bob: yo"
+    assert format_history_row(row(1, "bob", "alice", "yo"), "alice") == f"[{local(9, 5)}] bob: yo"
     assert format_history_row({}, "alice") == "[--:--] ?: "
 
 
