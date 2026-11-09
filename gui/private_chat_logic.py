@@ -8,7 +8,7 @@ private messages, so they are skipped here.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -30,12 +30,19 @@ def rows_for_conversation(
 
 
 def short_time(timestamp: Any) -> str:
-    """Return ``HH:MM`` for an ISO or ``YYYY-MM-DD HH:MM:SS`` timestamp."""
+    """Return the local ``HH:MM`` for a server timestamp.
+
+    The server stores UTC, either as ISO text with an offset or as SQLite's
+    ``YYYY-MM-DD HH:MM:SS`` (no offset, still UTC).
+    """
     if isinstance(timestamp, str):
         try:
-            return datetime.fromisoformat(timestamp).strftime("%H:%M")
+            moment = datetime.fromisoformat(timestamp)
         except ValueError:
-            pass
+            return "--:--"
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        return moment.astimezone().strftime("%H:%M")
     return "--:--"
 
 
