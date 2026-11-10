@@ -54,11 +54,28 @@ The SRS sample RTM used `N` without defining it. It is treated here as "not yet 
 | CHAT-SR-004 | Session tokens | TC-Sec-04 | `test_session_token_is_required_for_protected_requests`, token tests in `test_sr003_fuzz.py` | P |
 | CHAT-SR-005 | Per-IP rate limiting | TC-Sec-05 | `test_tc_sec_05_login_attempts_are_rate_limited_per_ip`, `test_tc_sec_05_successful_login_clears_failure_tracking` | P |
 
-**Totals:** 29 requirements: 29 P, 0 NR, 0 NI, 0 F, 0 B.
+**Totals:** 29 SRS requirements: 29 P, 0 NR, 0 NI, 0 F, 0 B. The added cases below are tracked separately.
 
 ## Test cases still open
 
-None. All 29 requirements have a passing test or measurement. `TC-Perf-01` and `TC-Scale-01` are verified by measurement scripts (results in `docs/performance/`), and `TC-Sec-05` verifies failed-login throttling and the reset of that state after a successful login, per source IP.
+## Cases added after the SRS
+
+These cases come from work built after the SRS (the desktop GUI for CHAT-UI-001 and extra server behaviour). Full steps are in the [Test Case Document](test-case-document.md). Rows marked `NR` have passing automated tests but still need their manual execution, which is recorded under CHAT-TEST-003.
+
+| Source | Feature | Test case | Test evidence (current `main`) | Status |
+|---|---|---|---|---|
+| CHAT-UI-001 | GUI register and log in | TC-GUI-01 | `test_auth_view.py`; manual check 10 Nov 2026 | P |
+| CHAT-UI-001 | GUI dashboard | TC-GUI-02 | `test_core_auth_messaging_rooms_and_history_use_server_protocol`; manual check 10 Nov 2026 | P |
+| CHAT-UI-001 | GUI private messaging | TC-GUI-03 | `test_private_chat_logic.py`; manual check 10 Nov 2026 | P |
+| CHAT-UI-001 | GUI private chat history | TC-GUI-04 | `test_private_chat_logic.py`; manual check 10 Nov 2026 | P |
+| CHAT-UI-001 | GUI group chat | TC-GUI-05 | `test_core_interoperates_with_existing_server_for_chat_rooms_history_and_files` | NR |
+| CHAT-UI-001 | GUI file attachment | TC-GUI-06 | `test_core_file_transfer_uses_existing_chunk_protocol`, `test_core_receives_and_verifies_incoming_file` | NR |
+| CHAT-UI-001 | GUI responsiveness and disconnect | TC-GUI-07 | `test_tk_event_poll_dispatches_on_calling_thread_and_reschedules`, `test_core_reports_unexpected_disconnect` | NR |
+| CHAT-UI-001 | Terminal client independent of GUI | TC-GUI-08 | `tests/test_client.py` and the full pytest run | P |
+| CHAT-F-014, CHAT-F-022 | Typing indicator in rooms | TC-Grp-05 | `test_typing_indicator_is_limited_to_room_members_and_clears_on_leave` | P |
+| CHAT-F-030 | File transfer robustness | TC-File-03 | `test_file_transfer_cleans_up_interrupted_upload` and related tests | P |
+
+**Totals (added cases):** 10 cases: 7 P, 3 NR, 0 NI, 0 F, 0 B.
 
 ## Evidence and completion checklist (issues #12 and #7)
 
