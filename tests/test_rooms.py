@@ -203,6 +203,49 @@ def test_non_member_cannot_list_room_users(chat_port):
         bob.close()
 
 
+def test_typing_indicator_is_limited_to_room_members_and_clears_on_leave(chat_port):
+    alice, a_tok = register_and_login(chat_port, "typingroom_alice")
+    bob, b_tok = register_and_login(chat_port, "typingroom_bob")
+    carol, c_tok = register_and_login(chat_port, "typingroom_carol")
+    try:
+        room_call(alice, a_tok, "CREATE_ROOM", room="General")
+        room_call(bob, b_tok, "JOIN_ROOM", room="General")
+
+        alice.send({"type": "TYPING", "token": a_tok,
+                    "roomId": "General", "isTyping": True})
+        started = bob.recv_type("TYPING_INDICATOR")
+        assert started["fromUser"] == "typingroom_alice"
+        assert started["roomId"] == "General" and started["isTyping"] is True
+        assert alice.recv_type("TYPING_RESPONSE")["status"] == "OK"
+        carol.sock.settimeout(0.3)
+        assert carol.recv() is None
+
+        alice.close()
+        stopped = bob.recv_type("TYPING_INDICATOR")
+        assert stopped["fromUser"] == "typingroom_alice"
+        assert stopped["roomId"] == "General" and stopped["isTyping"] is False
+        assert database.get_messages_for("typingroom_alice") == []
+    finally:
+        for conn in (alice, bob, carol):
+            conn.close()
+
+
+def test_typing_indicator_rejects_invalid_or_unjoined_rooms(chat_port):
+    alice, a_tok = register_and_login(chat_port, "typing_invalid_alice")
+    bob, b_tok = register_and_login(chat_port, "typing_invalid_bob")
+    try:
+        room_call(alice, a_tok, "CREATE_ROOM", room="General")
+        for room, expected_code in (("Missing", 404), ("General", 403), ("bad room", 400)):
+            bob.send({"type": "TYPING", "token": b_tok,
+                      "roomId": room, "isTyping": True})
+            response = bob.recv_type("TYPING_RESPONSE")
+            assert response["status"] == "ERROR"
+            assert response["code"] == expected_code
+    finally:
+        alice.close()
+        bob.close()
+
+
 # ------------------------------------------------------------- client display
 def test_client_formats_room_traffic():
     assert client.format_incoming({"type": "NEW_MESSAGE", "fromUser": "bob",

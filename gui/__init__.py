@@ -1,3 +1,4 @@
+HEAD
 """GUI helpers for the chat client."""
 
 from .files import FileTransferPanel, select_file, send_file, send_file_to_target
@@ -12,3 +13,5 @@ __all__ = [
     "send_file",
     "send_file_to_target",
 ]
+"""Tkinter GUI for the Team 5 chat application."""
+origin/main

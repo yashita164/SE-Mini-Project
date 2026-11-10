@@ -1,5 +1,7 @@
 """TCP server integration tests for the Team 5 chat application."""
 
+import base64
+import hashlib
 import json
 
 import socket
@@ -11,7 +13,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -109,6 +111,11 @@ def running_server(tmp_path, monkeypatch):
 
     """Start an isolated TCP server with a temporary SQLite database."""
 
+    real_gensalt = server.auth.bcrypt.gensalt
+    monkeypatch.setattr(
+        server.auth.bcrypt, "gensalt", lambda: real_gensalt(rounds=4)
+    )
+
     monkeypatch.setattr(
 
         database, "DB_PATH", tmp_path / "server_test.db"
@@ -120,6 +127,14 @@ def running_server(tmp_path, monkeypatch):
     with server.ACTIVE_CLIENTS_LOCK:
 
         server.ACTIVE_CLIENTS.clear()
+
+    with server.TYPING_LOCK:
+
+        server.TYPING_STATES.clear()
+
+    with server.FILE_TRANSFER_LOCK:
+
+        server.ACTIVE_FILE_TRANSFERS.clear()
 
     with server.LOGIN_RATE_LOCK:
 
@@ -158,6 +173,10 @@ def running_server(tmp_path, monkeypatch):
         with server.ACTIVE_CLIENTS_LOCK:
 
             server.ACTIVE_CLIENTS.clear()
+
+        with server.FILE_TRANSFER_LOCK:
+
+            server.ACTIVE_FILE_TRANSFERS.clear()
 
         with server.LOGIN_RATE_LOCK:
 
@@ -304,6 +323,51 @@ def register_and_login(client, username):
     assert len(login["token"]) > 20
 
     return login
+
+
+def start_file_transfer(client, token, transfer_id, data, filename="payload.bin",
+                        recipient=None, room=None):
+    request = {
+        "type": "FILE_START", "token": token, "filename": filename,
+        "size": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+        "transferId": transfer_id,
+    }
+    if recipient is not None:
+        request["toUser"] = recipient
+    if room is not None:
+        request["roomId"] = room
+    client.send(request)
+    return client.receive()
+
+
+def send_file_chunks(client, token, transfer_id, data, timeout=SOCKET_TIMEOUT):
+    chunks = [data[offset:offset + server.FILE_CHUNK_SIZE]
+              for offset in range(0, len(data), server.FILE_CHUNK_SIZE)] or [b""]
+    response = None
+    for index, chunk in enumerate(chunks):
+        final = index == len(chunks) - 1
+        client.send({
+            "type": "FILE_CHUNK", "token": token, "transferId": transfer_id,
+            "data": base64.b64encode(chunk).decode("ascii"), "final": final,
+        })
+        response = client.receive(timeout=timeout)
+        expected = "FILE_SENT" if final else "FILE_CHUNK_ACK"
+        assert response["type"] == expected
+        assert response["transferId"] == transfer_id
+    return response
+
+
+def read_received_file(client, transfer_id, chunk_count, timeout=SOCKET_TIMEOUT):
+    started = client.receive(timeout=timeout)
+    chunks = [client.receive(timeout=timeout) for _ in range(chunk_count)]
+    ended = client.receive(timeout=timeout)
+    assert started["type"] == "FILE_RECEIVE_START"
+    assert started["transferId"] == transfer_id
+    assert all(chunk["type"] == "FILE_RECEIVE_CHUNK" for chunk in chunks)
+    assert ended["type"] == "FILE_RECEIVE_END"
+    return started, b"".join(
+        base64.b64decode(chunk["data"], validate=True) for chunk in chunks
+    )
 
 def test_server_register_and_login(running_server):
 
@@ -530,6 +594,65 @@ def test_history_survives_reconnect(running_server):
                 for message in history["messages"]
 
             )
+
+
+def test_history_request_pages_messages_across_the_90_day_window(
+    running_server, monkeypatch,
+):
+    fixed_now = datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now if tz else fixed_now.replace(tzinfo=None)
+
+    monkeypatch.setattr(database, "datetime", FrozenDateTime)
+    with ChatTestClient(running_server) as alice:
+        register_and_login(alice, "history_90d_alice")
+        seeded = [
+            ("outside", 90, 1),
+            ("boundary", 90, 0),
+            ("older than 60 days", 61, 0),
+            ("older than 30 days", 31, 0),
+            ("recent", 0, 0),
+        ]
+        for content, days, seconds in seeded:
+            message_id = database.save_message(
+                "history_90d_alice", "history_90d_bob", content,
+                delivered=True,
+            )
+            created_at = fixed_now - timedelta(days=days, seconds=seconds)
+            with database.get_connection() as connection:
+                connection.execute(
+                    "UPDATE messages SET created_at = ? WHERE id = ?",
+                    (created_at.strftime("%Y-%m-%d %H:%M:%S"), message_id),
+                )
+
+        pages = []
+        before_id = None
+        while True:
+            request = {
+                "type": "HISTORY_REQUEST", "token": alice.token, "limit": 2,
+            }
+            if before_id is not None:
+                request["beforeId"] = before_id
+            alice.send(request)
+            response = alice.receive()
+            assert response["type"] == "HISTORY_RESPONSE"
+            pages.append(response["messages"])
+            before_id = response["nextBeforeId"]
+            if before_id is None:
+                break
+
+        chronological = [
+            message for page in reversed(pages) for message in page
+        ]
+        assert [message["content"] for message in chronological] == [
+            "boundary", "older than 60 days", "older than 30 days", "recent",
+        ]
+        assert [message["created_at"] for message in chronological] == sorted(
+            message["created_at"] for message in chronological
+        )
 
 def test_offline_message_is_stored(running_server):
 
@@ -771,8 +894,10 @@ def test_silent_disconnect_is_removed_from_presence_and_session(
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
             with server.ACTIVE_CLIENTS_LOCK:
-                if "silent_disconnect_user" not in server.ACTIVE_CLIENTS:
-                    break
+                still_present = "silent_disconnect_user" in server.ACTIVE_CLIENTS
+            session_user = database.get_session_user(token)
+            if not still_present and session_user is None:
+                break
             time.sleep(0.02)
 
         with server.ACTIVE_CLIENTS_LOCK:
@@ -869,6 +994,7 @@ def test_typing_indicator_is_sent_to_recipient_and_clears(running_server):
         register_and_login(bob, "typing_bob")
         register_and_login(charlie, "typing_charlie")
 
+        started_at = time.monotonic()
         alice.send({
             "type": "TYPING",
             "token": alice.token,
@@ -880,8 +1006,10 @@ def test_typing_indicator_is_sent_to_recipient_and_clears(running_server):
         assert started["type"] == "TYPING_INDICATOR"
         assert started["fromUser"] == "typing_alice"
         assert started["isTyping"] is True
+        assert time.monotonic() - started_at < 2
         assert alice.receive()["type"] == "TYPING_RESPONSE"
 
+        stopped_at = time.monotonic()
         alice.send({
             "type": "TYPING",
             "token": alice.token,
@@ -893,6 +1021,7 @@ def test_typing_indicator_is_sent_to_recipient_and_clears(running_server):
         assert stopped["type"] == "TYPING_INDICATOR"
         assert stopped["fromUser"] == "typing_alice"
         assert stopped["isTyping"] is False
+        assert time.monotonic() - stopped_at < 2
         assert alice.receive()["type"] == "TYPING_RESPONSE"
 
         expect_no_message(charlie.sock, charlie.stream)
@@ -913,15 +1042,181 @@ def test_typing_indicator_requires_authentication(running_server):
         assert response["code"] == 401
 
 
+def test_typing_indicator_deduplicates_repeated_state_and_rejects_bad_recipient(
+    running_server,
+):
+    with (
+        ChatTestClient(running_server) as alice,
+        ChatTestClient(running_server) as bob,
+    ):
+        register_and_login(alice, "typing_repeat_alice")
+        register_and_login(bob, "typing_repeat_bob")
+
+        request = {
+            "type": "TYPING", "token": alice.token,
+            "toUser": "typing_repeat_bob", "isTyping": True,
+        }
+        alice.send(request)
+        assert bob.receive()["isTyping"] is True
+        assert alice.receive()["status"] == "OK"
+
+        alice.send(request)
+        assert alice.receive()["status"] == "OK"
+        expect_no_message(bob.sock, bob.stream)
+
+        alice.send({**request, "toUser": "missing_typing_user"})
+        response = alice.receive()
+        assert response["type"] == "TYPING_RESPONSE"
+        assert response["code"] == 404
+
+
+def test_typing_state_clears_on_disconnect_and_expiry(running_server):
+    with ChatTestClient(running_server) as bob:
+        alice = ChatTestClient(running_server)
+        register_and_login(alice, "typing_cleanup_alice")
+        register_and_login(bob, "typing_cleanup_bob")
+        key = ("typing_cleanup_alice", "user", "typing_cleanup_bob")
+        request = {
+            "type": "TYPING", "token": alice.token,
+            "toUser": "typing_cleanup_bob", "isTyping": True,
+        }
+
+        alice.send(request)
+        assert bob.receive()["isTyping"] is True
+        assert alice.receive()["status"] == "OK"
+        with server.TYPING_LOCK:
+            server.TYPING_STATES[key] = time.monotonic() - server.TYPING_STATE_TIMEOUT_SECONDS - 1
+        server.expire_stale_typing_states()
+        expired = bob.receive()
+        assert expired["type"] == "TYPING_INDICATOR"
+        assert expired["isTyping"] is False
+        assert key not in server.TYPING_STATES
+
+        alice.send(request)
+        assert bob.receive()["isTyping"] is True
+        assert alice.receive()["status"] == "OK"
+        disconnected_at = time.monotonic()
+        alice.close()
+        stopped = bob.receive()
+        assert stopped["type"] == "TYPING_INDICATOR"
+        assert stopped["fromUser"] == "typing_cleanup_alice"
+        assert stopped["isTyping"] is False
+        assert time.monotonic() - disconnected_at < 2
+        assert key not in server.TYPING_STATES
+
+
+def test_typing_state_expires_within_two_seconds(running_server):
+    with (
+        ChatTestClient(running_server) as alice,
+        ChatTestClient(running_server) as bob,
+    ):
+        register_and_login(alice, "typing_expiry_alice")
+        register_and_login(bob, "typing_expiry_bob")
+        key = ("typing_expiry_alice", "user", "typing_expiry_bob")
+
+        started_at = time.monotonic()
+        alice.send({
+            "type": "TYPING", "token": alice.token,
+            "toUser": "typing_expiry_bob", "isTyping": True,
+        })
+        assert bob.receive()["isTyping"] is True
+        assert alice.receive()["status"] == "OK"
+
+        stopped = bob.receive(timeout=2)
+        assert stopped["type"] == "TYPING_INDICATOR"
+        assert stopped["fromUser"] == "typing_expiry_alice"
+        assert stopped["isTyping"] is False
+        assert time.monotonic() - started_at < 2
+        assert key not in server.TYPING_STATES
+
+
 def test_file_transfer_preserves_bytes_and_checksum(running_server):
     """TC-File-01: recipient receives the exact file bytes and SHA-256."""
-    import base64
-    import hashlib
-    import uuid
-
     original = bytes(range(256)) * 40  # Binary data containing arbitrary byte values.
     checksum = hashlib.sha256(original).hexdigest()
-    transfer_id = str(uuid.uuid4())
+    transfer_id = "binary-transfer-1"
+    with (
+        ChatTestClient(running_server) as alice,
+        ChatTestClient(running_server) as bob,
+    ):
+        register_and_login(alice, "file_binary_alice")
+        register_and_login(bob, "file_binary_bob")
+
+        ready = start_file_transfer(
+            alice, alice.token, transfer_id, original,
+            recipient="file_binary_bob",
+        )
+        assert ready["type"] == "FILE_READY"
+        assert send_file_chunks(alice, alice.token, transfer_id, original)["sha256"] == checksum
+
+        metadata, received = read_received_file(
+            bob, transfer_id,
+            (len(original) + server.FILE_CHUNK_SIZE - 1) // server.FILE_CHUNK_SIZE,
+        )
+        assert metadata["fromUser"] == "file_binary_alice"
+        assert metadata["filename"] == "payload.bin"
+        assert metadata["sha256"] == checksum
+        assert received == original
+        assert hashlib.sha256(received).hexdigest() == checksum
+
+
+def test_file_transfer_supports_empty_file_and_isolated_transfer_ids(running_server):
+    with (
+        ChatTestClient(running_server) as alice,
+        ChatTestClient(running_server) as bob,
+    ):
+        register_and_login(alice, "file_multi_alice")
+        register_and_login(bob, "file_multi_bob")
+
+        for transfer_id, filename, data in (
+            ("empty-transfer", "empty.bin", b""),
+            ("second-transfer", "second.bin", b"second payload"),
+        ):
+            ready = start_file_transfer(
+                alice, alice.token, transfer_id, data, filename,
+                recipient="file_multi_bob",
+            )
+            assert ready["type"] == "FILE_READY"
+            sent = send_file_chunks(alice, alice.token, transfer_id, data)
+            assert sent["size"] == len(data)
+            metadata, received = read_received_file(bob, transfer_id,
+                                                     1 if data else 0)
+            assert metadata["filename"] == filename
+            assert received == data
+
+
+def test_file_transfer_broadcasts_only_to_online_room_members(running_server):
+    with (
+        ChatTestClient(running_server) as alice,
+        ChatTestClient(running_server) as bob,
+        ChatTestClient(running_server) as carol,
+        ChatTestClient(running_server) as outsider,
+    ):
+        register_and_login(alice, "file_room_alice")
+        register_and_login(bob, "file_room_bob")
+        register_and_login(carol, "file_room_carol")
+        register_and_login(outsider, "file_room_outside")
+        alice.send({"type": "CREATE_ROOM", "token": alice.token, "room": "Files"})
+        assert alice.receive()["status"] == "OK"
+        bob.send({"type": "JOIN_ROOM", "token": bob.token, "room": "Files"})
+        assert bob.receive()["status"] == "OK"
+        assert alice.receive()["type"] == "ROOM_EVENT"
+        carol.send({"type": "JOIN_ROOM", "token": carol.token, "room": "Files"})
+        assert carol.receive()["status"] == "OK"
+        assert alice.receive()["type"] == "ROOM_EVENT"
+        assert bob.receive()["type"] == "ROOM_EVENT"
+
+        data = bytes(range(64))
+        transfer_id = "room-file-transfer"
+        ready = start_file_transfer(alice, alice.token, transfer_id, data, room="Files")
+        assert ready["type"] == "FILE_READY"
+        sent = send_file_chunks(alice, alice.token, transfer_id, data)
+        assert sent["deliveredTo"] == 2
+        for recipient in (bob, carol):
+            metadata, received = read_received_file(recipient, transfer_id, 1)
+            assert metadata["roomId"] == "Files"
+            assert received == data
+        expect_no_message(outsider.sock, outsider.stream, timeout=0.3)
 
 # ---------------------------------------------------------------------------
 # TC-Msg-03 (CHAT-F-012): queue messages for offline users, deliver on login
@@ -1072,24 +1367,269 @@ def test_msg_03_live_messages_are_not_queued(running_server):
             )
 
 
-def test_file_transfer_rejects_file_over_configured_limit(running_server):
+@pytest.mark.parametrize(
+    "size", [server.MAX_FILE_SIZE + 1, server.MAX_FILE_SIZE * 100],
+    ids=["one-byte-over", "significantly-over"],
+)
+def test_file_transfer_rejects_file_over_configured_limit(running_server, size):
     """Oversized file metadata is rejected before any file data is sent."""
-    import uuid
-
     with ChatTestClient(running_server) as alice:
         register_and_login(alice, "oversize_sender")
+        transfer_id = "oversized-transfer"
         alice.send({
             "type": "FILE_START",
             "token": alice.token,
             "toUser": "not_needed_for_oversize_validation",
             "filename": "too-large.bin",
-            "size": server.MAX_FILE_SIZE + 1,
+            "size": size,
             "sha256": "a" * 64,
-            "transferId": str(uuid.uuid4()),
+            "transferId": transfer_id,
         })
         response = alice.receive()
         assert response["type"] == "FILE_ERROR"
         assert response["code"] == 413
+        assert response["message"]
+        assert transfer_id not in server.ACTIVE_FILE_TRANSFERS
+        alice.send({
+            "type": "FILE_CHUNK", "token": alice.token,
+            "transferId": transfer_id, "data": "", "final": True,
+        })
+        rejected_chunk = alice.receive()
+        assert rejected_chunk["type"] == "FILE_ERROR"
+        assert rejected_chunk["code"] == 404
+
+
+@pytest.mark.parametrize("size", [-1, "12", None, True, 1.5],
+                         ids=["negative", "string", "null", "boolean", "float"])
+def test_file_transfer_rejects_invalid_sizes_before_accepting_chunks(
+    running_server, size
+):
+    with ChatTestClient(running_server) as alice:
+        register_and_login(alice, "invalid_size_sender")
+        transfer_id = f"invalid-size-{type(size).__name__}"
+        request = {
+            "type": "FILE_START", "token": alice.token,
+            "toUser": "recipient-not-checked-for-invalid-size",
+            "filename": "payload.bin", "sha256": "a" * 64,
+            "transferId": transfer_id,
+        }
+        if size is not None:
+            request["size"] = size
+        alice.send(request)
+        response = alice.receive()
+        assert response["type"] == "FILE_ERROR"
+        assert response["code"] == 400
+        assert transfer_id not in server.ACTIVE_FILE_TRANSFERS
+
+
+def test_file_transfer_rejects_missing_size_and_unsafe_filename(running_server):
+    with ChatTestClient(running_server) as alice:
+        register_and_login(alice, "invalid_metadata_sender")
+        for index, fields in enumerate((
+            {"filename": "missing-size.bin"},
+            {"filename": "../escape.bin", "size": 1},
+            {"filename": "..\\escape.bin", "size": 1},
+            {"filename": "C:escape.bin", "size": 1},
+        )):
+            transfer_id = f"invalid-metadata-{index}"
+            alice.send({
+                "type": "FILE_START", "token": alice.token,
+                "toUser": "recipient-not-checked-for-invalid-metadata",
+                "sha256": "a" * 64, "transferId": transfer_id, **fields,
+            })
+            response = alice.receive()
+            assert response["type"] == "FILE_ERROR"
+            assert response["code"] == 400
+            assert transfer_id not in server.ACTIVE_FILE_TRANSFERS
+
+
+def test_file_transfer_at_exact_limit_is_accepted_and_intact(running_server):
+    original = bytes(range(256)) * (server.MAX_FILE_SIZE // 256)
+    with (
+        ChatTestClient(running_server) as alice,
+        ChatTestClient(running_server) as bob,
+    ):
+        register_and_login(alice, "limit_sender")
+        register_and_login(bob, "limit_recipient")
+        transfer_id = "exact-limit-transfer"
+        ready = start_file_transfer(
+            alice, alice.token, transfer_id, original,
+            recipient="limit_recipient",
+        )
+        assert ready["type"] == "FILE_READY"
+        received_file = {}
+        receiver_thread = threading.Thread(
+            target=lambda: received_file.setdefault(
+                "value",
+                read_received_file(
+                    bob, transfer_id,
+                    server.MAX_FILE_SIZE // server.FILE_CHUNK_SIZE,
+                    timeout=30,
+                ),
+            ),
+            daemon=True,
+        )
+        receiver_thread.start()
+        sent = send_file_chunks(alice, alice.token, transfer_id, original, timeout=30)
+        assert sent["size"] == server.MAX_FILE_SIZE
+        receiver_thread.join(timeout=30)
+        assert not receiver_thread.is_alive()
+        metadata, received = received_file["value"]
+        assert metadata["size"] == server.MAX_FILE_SIZE
+        assert received == original
+
+
+def test_file_transfer_cleans_up_interrupted_upload(running_server):
+    with ChatTestClient(running_server) as recipient:
+        register_and_login(recipient, "interrupted_recipient")
+        alice = ChatTestClient(running_server)
+        register_and_login(alice, "interrupted_sender")
+        transfer_id = "interrupted-transfer"
+        ready = start_file_transfer(
+            alice, alice.token, transfer_id, b"0123456789",
+            recipient="interrupted_recipient",
+        )
+        assert ready["type"] == "FILE_READY"
+        alice.close()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            if transfer_id not in server.ACTIVE_FILE_TRANSFERS:
+                break
+            time.sleep(0.01)
+        assert transfer_id not in server.ACTIVE_FILE_TRANSFERS
+
+
+def test_file_transfer_rejects_recipient_disconnect_and_releases_state(running_server):
+    with ChatTestClient(running_server) as alice:
+        register_and_login(alice, "disconnect_sender")
+        bob = ChatTestClient(running_server)
+        register_and_login(bob, "disconnect_recipient")
+        transfer_id = "recipient-disconnect-transfer"
+        ready = start_file_transfer(
+            alice, alice.token, transfer_id, b"x", recipient="disconnect_recipient",
+        )
+        assert ready["type"] == "FILE_READY"
+        bob.close()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            with server.ACTIVE_CLIENTS_LOCK:
+                if "disconnect_recipient" not in server.ACTIVE_CLIENTS:
+                    break
+            time.sleep(0.01)
+        alice.send({
+            "type": "FILE_CHUNK", "token": alice.token, "transferId": transfer_id,
+            "data": base64.b64encode(b"x").decode("ascii"), "final": True,
+        })
+        response = alice.receive()
+        assert response["type"] == "FILE_ERROR" and response["code"] == 404
+        assert transfer_id not in server.ACTIVE_FILE_TRANSFERS
+
+
+def test_file_transfer_expires_abandoned_state(running_server):
+    with (
+        ChatTestClient(running_server) as alice,
+        ChatTestClient(running_server) as bob,
+    ):
+        register_and_login(alice, "expiry_sender")
+        register_and_login(bob, "expiry_recipient")
+        transfer_id = "expired-transfer"
+        ready = start_file_transfer(
+            alice, alice.token, transfer_id, b"pending", recipient="expiry_recipient",
+        )
+        assert ready["type"] == "FILE_READY"
+        owner, _ = server.ACTIVE_FILE_TRANSFERS[transfer_id]
+        with server.FILE_TRANSFER_LOCK:
+            server.ACTIVE_FILE_TRANSFERS[transfer_id] = (
+                owner, time.monotonic() - server.FILE_TRANSFER_TIMEOUT_SECONDS - 1,
+            )
+        server.expire_stale_file_transfers()
+        assert transfer_id not in server.ACTIVE_FILE_TRANSFERS
+        assert transfer_id not in owner.file_transfers
+
+
+def test_file_transfer_idle_timeout_resets_after_valid_chunk(running_server):
+    data = b"xy"
+    with (
+        ChatTestClient(running_server) as alice,
+        ChatTestClient(running_server) as bob,
+    ):
+        register_and_login(alice, "idle_timeout_sender")
+        register_and_login(bob, "idle_timeout_recipient")
+        transfer_id = "idle-timeout-transfer"
+        ready = start_file_transfer(
+            alice, alice.token, transfer_id, data,
+            recipient="idle_timeout_recipient",
+        )
+        assert ready["type"] == "FILE_READY"
+
+        with server.FILE_TRANSFER_LOCK:
+            owner, _ = server.ACTIVE_FILE_TRANSFERS[transfer_id]
+            old_timestamp = time.monotonic() - server.FILE_TRANSFER_TIMEOUT_SECONDS - 1
+            server.ACTIVE_FILE_TRANSFERS[transfer_id] = (
+                owner, old_timestamp,
+            )
+
+        alice.send({
+            "type": "FILE_CHUNK", "token": alice.token,
+            "transferId": transfer_id,
+            "data": base64.b64encode(data[:1]).decode("ascii"),
+            "final": False,
+        })
+        assert alice.receive()["type"] == "FILE_CHUNK_ACK"
+        with server.FILE_TRANSFER_LOCK:
+            refreshed_at = server.ACTIVE_FILE_TRANSFERS[transfer_id][1]
+        assert refreshed_at > old_timestamp
+        server.expire_stale_file_transfers(
+            now=old_timestamp + server.FILE_TRANSFER_TIMEOUT_SECONDS + 1,
+        )
+        assert transfer_id in server.ACTIVE_FILE_TRANSFERS
+
+        sent = send_file_chunks(alice, alice.token, transfer_id, data[1:])
+        assert sent["type"] == "FILE_SENT"
+        _, received = read_received_file(bob, transfer_id, 1)
+        assert received == data
+
+
+def test_room_file_transfer_skips_member_who_leaves_during_upload(running_server):
+    with (
+        ChatTestClient(running_server) as alice,
+        ChatTestClient(running_server) as bob,
+        ChatTestClient(running_server) as carol,
+    ):
+        register_and_login(alice, "room_transfer_sender")
+        register_and_login(bob, "room_transfer_leaver")
+        register_and_login(carol, "room_remaining_carol")
+        alice.send({"type": "CREATE_ROOM", "token": alice.token, "room": "General"})
+        assert alice.receive()["status"] == "OK"
+        bob.send({"type": "JOIN_ROOM", "token": bob.token, "room": "General"})
+        assert bob.receive()["status"] == "OK"
+        assert alice.receive()["type"] == "ROOM_EVENT"
+        carol.send({"type": "JOIN_ROOM", "token": carol.token, "room": "General"})
+        assert carol.receive()["status"] == "OK"
+        assert alice.receive()["type"] == "ROOM_EVENT"
+        assert bob.receive()["type"] == "ROOM_EVENT"
+
+        data = b"private room data"
+        transfer_id = "room-member-leaves-during-upload"
+        ready = start_file_transfer(
+            alice, alice.token, transfer_id, data, room="General",
+        )
+        assert ready["type"] == "FILE_READY"
+
+        bob.send({"type": "LEAVE_ROOM", "token": bob.token, "room": "General"})
+        assert bob.receive()["status"] == "OK"
+        assert alice.receive()["type"] == "ROOM_EVENT"
+        assert carol.receive()["type"] == "ROOM_EVENT"
+
+        sent = send_file_chunks(alice, alice.token, transfer_id, data)
+        assert sent["type"] == "FILE_SENT"
+        assert sent["deliveredTo"] == 1
+        _, received = read_received_file(
+            carol, transfer_id, 1,
+        )
+        assert received == data
+        expect_no_message(bob.sock, bob.stream)
+        assert transfer_id not in server.ACTIVE_FILE_TRANSFERS
 
 def test_msg_03_only_the_recipient_receives_the_backlog(running_server):
     """TC-Msg-03: another user's login does not receive queued messages."""
@@ -1334,4 +1874,3 @@ def test_tc_admin_03_admin_actions_are_audited_with_actor_and_timestamp(
     for entry in entries:
         assert entry["timestamp"].endswith("Z")
         datetime.fromisoformat(entry["timestamp"].replace("Z", "+00:00"))
-

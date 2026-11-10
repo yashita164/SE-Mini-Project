@@ -3,6 +3,7 @@
 
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 DB_PATH = Path(__file__).with_name("chat.db")
@@ -68,6 +69,11 @@ def init_db():
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 delivered INTEGER NOT NULL DEFAULT 0
             );
+
+            CREATE INDEX IF NOT EXISTS idx_messages_sender_history
+                ON messages (sender, created_at, id);
+            CREATE INDEX IF NOT EXISTS idx_messages_recipient_history
+                ON messages (recipient, created_at, id);
         """)
         _migrate_messages_table(connection)
 
@@ -240,21 +246,40 @@ def mark_message_delivered(message_id):
         )
 
 
-def get_messages_for(username, limit=50):
-    """Return recent sent and received messages in chronological order."""
+def get_messages_for(username, limit=50, before_id=None):
+    """Return one chronological page of a user's last 90 days of messages."""
     if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
         raise ValueError("limit must be a positive integer")
+    if (before_id is not None
+            and (not isinstance(before_id, int) or isinstance(before_id, bool)
+                 or before_id < 1)):
+        raise ValueError("before_id must be a positive integer")
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    cursor_filter = " AND id < ?" if before_id is not None else ""
+    parameters = [username, username, cutoff]
+    if before_id is not None:
+        cursor_filter = """ AND (created_at, id) < (
+            SELECT created_at, id FROM messages
+            WHERE id = ? AND (sender = ? OR recipient = ?)
+        )"""
+        parameters.append(before_id)
+        parameters.extend((username, username))
+    parameters.append(limit)
 
     with get_connection() as connection:
         rows = connection.execute(
-            """
+            f"""
             SELECT id, sender, recipient, content, created_at
             FROM messages
-            WHERE sender = ? OR recipient = ?
-            ORDER BY id DESC
+            WHERE (sender = ? OR recipient = ?) AND created_at >= ?
+            {cursor_filter}
+            ORDER BY created_at DESC, id DESC
             LIMIT ?
             """,
-            (username, username, limit),
+            parameters,
         ).fetchall()
 
     return [dict(row) for row in reversed(rows)]

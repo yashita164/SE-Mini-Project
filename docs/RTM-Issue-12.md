@@ -2,7 +2,7 @@
 
 **Related issues:** #12 (map issues to test case IDs and define the RTM status legend) and #7 (update the RTM from verified results)  
 **Source documents:** SRS, SAD and STP submitted for the Team 5 chat application  
-**Evidence:** `python -m pytest -v` on `main` after all Sprint 2 pull requests were merged: 115 tests collected, 115 passed, 0 failed. CI run: https://github.com/yashita164/SE-Mini-Project/actions/runs/40567424923
+**Evidence:** `python -m pytest -v` on `main` after all Sprint 2 pull requests were merged: 148 tests collected, 148 passed, 0 failed. CI run: https://github.com/yashita164/SE-Mini-Project/actions/runs/41162261396
 
 ## Purpose
 
@@ -26,8 +26,8 @@ The SRS sample RTM used `N` without defining it. It is treated here as "not yet 
 |---|---|---|---|---|
 | CHAT-F-001 | Register account | TC-Auth-01 | `test_auth.py` (`test_auth_01_*`), `test_server.py` registration tests | P |
 | CHAT-F-002 | Authenticate credentials | TC-Auth-02 | `test_auth.py` (`test_auth_02_*`), `test_server_rejects_invalid_login` | P |
-| CHAT-F-003 | Logout / close socket | TC-Auth-03 | No dedicated test; logout leaves the socket open (defect D-06) | NI |
-| CHAT-F-004 | Detect abrupt disconnection | TC-Auth-04 | `test_silent_disconnect_is_removed_from_presence_and_session` | I |
+| CHAT-F-003 | Logout / close socket | TC-Auth-03 | `test_successful_logout_closes_connection_and_removes_active_client` | P |
+| CHAT-F-004 | Detect abrupt disconnection | TC-Auth-04 | `test_silent_disconnect_is_removed_from_presence_and_session` | P |
 | CHAT-F-010 | Private message | TC-Msg-01 | `test_private_message_reaches_only_recipient` | P |
 | CHAT-F-011 | Real-time delivery | TC-Msg-02 | `test_tc_msg_02_real_time_delivery_within_latency_target` | P |
 | CHAT-F-012 | Queue offline messages | TC-Msg-03 | `test_msg_03_*` in `test_server.py` and `test_database.py` | P |
@@ -45,30 +45,28 @@ The SRS sample RTM used `N` without defining it. It is treated here as "not yet 
 | CHAT-F-042 | Log admin actions | TC-Admin-03 | `test_tc_admin_03_*` | P |
 | CHAT-NF-001 | Latency ≤ 500 ms at p95 | TC-Perf-01 | `scripts/measure_message_latency.py` load result: 100 clients, 1,000 samples, p95 23.461 ms | P |
 | CHAT-NF-002 | 200 concurrent clients | TC-Scale-01 | `scripts/measure_concurrent_clients.py`: 200 clients, 200 active sessions, 0 dropped | P |
-| CHAT-NF-003 | Dead-connection cleanup within 30 s | TC-Rel-01 | `test_silent_disconnect_is_removed_from_presence_and_session` | I |
-| CHAT-NF-004 | 90-day history retention | TC-Ops-01 | No retention test; history request returns the latest 50 | NI |
+| CHAT-NF-003 | Dead-connection cleanup within 30 s | TC-Rel-01 | `test_silent_disconnect_is_removed_from_presence_and_session` | P |
+| CHAT-NF-004 | 90-day history retention | TC-Ops-01 | `test_history_includes_messages_through_the_90_day_boundary`, `test_history_request_pages_messages_across_the_90_day_window` | P |
 | CHAT-NF-005 | Responsive UI during socket I/O | TC-UX-01 | `test_tc_ux_01_user_can_send_while_receiver_waits_on_slow_network` | P |
-| CHAT-SR-001 | TLS / SSL | TC-Sec-01 | `test_tls_handshake_round_trips_application_data` | I |
+| CHAT-SR-001 | TLS / SSL | TC-Sec-01 | `test_tls_handshake_round_trips_application_data` | P |
 | CHAT-SR-002 | Password hashing | TC-Sec-02 | `test_sec_02_*` in `test_auth.py` and `test_server.py` | P |
 | CHAT-SR-003 | Input validation | TC-Sec-03 | `test_sr003_fuzz.py` (37 tests) and `test_malformed_json_returns_error_and_connection_recovers` | P |
 | CHAT-SR-004 | Session tokens | TC-Sec-04 | `test_session_token_is_required_for_protected_requests`, token tests in `test_sr003_fuzz.py` | P |
 | CHAT-SR-005 | Per-IP rate limiting | TC-Sec-05 | `test_tc_sec_05_login_attempts_are_rate_limited_per_ip`, `test_tc_sec_05_successful_login_clears_failure_tracking` | P |
 
-**Totals:** 29 requirements: 23 P, 0 NR, 6 NI, 0 F, 0 B.
+**Totals:** 29 requirements: 29 P, 0 NR, 0 NI, 0 F, 0 B.
 
 ## Test cases still open
 
-- `TC-Auth-03` logout closing the socket: not implemented (defect D-06).
-- `TC-Ops-01` 90-day retention: messages are kept but only the latest 50 are returned; no retention test.
-- `TC-Sec-05` verifies failed-login throttling and successful-login state reset per source IP.
+None. All 29 requirements have a passing test or measurement. `TC-Perf-01` and `TC-Scale-01` are verified by measurement scripts (results in `docs/performance/`), and `TC-Sec-05` verifies failed-login throttling and the reset of that state after a successful login, per source IP.
 
 ## Evidence and completion checklist (issues #12 and #7)
 
 - [x] Every SRS requirement is mapped to its STP test-case ID.
 - [x] Status legend defined and the undefined `N` value replaced.
-- [x] Test suite run on `main`: 115 tests, all passed. CI run: https://github.com/yashita164/SE-Mini-Project/actions/runs/40567424923
-- [x] Statuses updated from the verified results (#7).
-- [x] Open test cases listed with reasons.
+- [x] Test suite run on \main`: 148 tests, all passed. CI run: <the new run link>and the line
+- [x] Open test cases listed with reasons.with
+- [x] No open test cases.`
 - [ ] Pull request referencing #12 and #7.
 - [ ] Review from a teammate other than the author.
 - [ ] CI run URL added to issues #12 and #7.

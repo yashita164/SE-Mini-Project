@@ -64,7 +64,7 @@ The complete **Software Requirements Specification (SRS)** includes:
 |---|---|
 | Sakshi Srinivas Ghodke | PES2UG24CS914 |
 | Yashita Anand | PES2UG24CS613 |
-| Ujwal K | PES2UG24C566 |
+| Ujwal K | PES2UG24CS566 |
 | Varun Sahu | PES2UG24CS576 |
 
 ## Project Information
@@ -164,6 +164,74 @@ Throttled connections receive `LOGIN_RESPONSE` with code `429` and are closed.
 GitHub Actions runs this same command on every push and pull request using
 Python 3.13.
 
+## Tkinter desktop GUI
+
+The GUI foundation lives in `gui/`: `app.py` owns the Tk window and navigation,
+`client_core.py` is the shared TCP client, and `dashboard.py` displays online
+users, rooms and connection status. Tkinter is part of the Python standard
+library and adds no package to `requirements.txt`; install a Python build that
+includes Tcl/Tk.
+
+Start `server.py` in one terminal as described above, then launch the GUI from
+the repository root in another terminal:
+
+```powershell
+python -m gui.app
+```
+
+The shared client speaks the server's newline-delimited UTF-8 JSON protocol.
+It reads responses on a background thread and places protocol events in a
+`queue.Queue`; the Tk application drains that queue with `root.after()` and
+updates widgets only on the main thread. The same client layer supports
+registration/login, private and room messaging, room/user lists, paginated
+history, typing indicators and both directions of the existing file-transfer
+protocol. Received files are size/checksum verified and saved under
+`received_files/`. It honors the existing `CHAT_TLS_ENABLED` and
+`CHAT_TLS_CA_FILE` client settings.
+
+The GUI is being integrated in modules by the team. `gui.auth_view.AuthView`
+and the private-chat, room-chat and file screens are extension points and may
+not yet be present. Until those modules are integrated, the app shows an
+authentication placeholder and chat-screen placeholders; the dashboard and
+shared client API are available for their implementation. The backend has no
+push notification for changes to the global online-user list, so the dashboard
+refreshes it periodically. Unexpected disconnections are reported; automatic
+reconnection is not implemented. The server closes a connection after failed
+login, so the authentication view must reconnect before another attempt.
+
+`ClientCore` is the integration surface for screens:
+
+- `connect()` starts connecting in the background. Read `connection_state`,
+  `is_connected`, `is_authenticated` and `username` for current state.
+- `register(username, password)` and `login(username, password)` send the
+  existing authentication requests.
+- `send_private_message(recipient, content)` and
+  `send_room_message(room, content)` use the existing `SEND_MESSAGE` format.
+- `create_room(room)`, `join_room(room)`, `leave_room(room)`, `list_rooms()`
+  and `list_users(room=None)` expose the backend's room and presence requests.
+- `request_history(limit=50, before_id=None)` requests one history page;
+  `nextBeforeId` in the `HISTORY_RESPONSE` is the cursor for the next older
+  page.
+- `send_typing(destination, is_typing, room=False)` and
+  `send_file(destination, filepath)` expose the existing typing and transfer
+  protocols. File sends run in a worker; received files are verified and
+  reported through a `file_transfer` event with the saved path.
+- `logout()` requests logout and `close()` shuts down the connection. Consume
+  server responses and local lifecycle/error events from `client.events`.
+
+Server messages are queued unchanged as dictionaries with a `type`.
+Client-generated events use `_event`: `connection`, `client_error` or
+`file_transfer`. Screens should implement `handle_event(event)` and let the app
+deliver queued events; they must not read the socket or update Tk widgets from
+worker threads.
+
+The app loads optional teammate views using these contracts: `gui.auth_view`
+exports `AuthView(parent=..., client=..., on_authenticated=...)`;
+`gui.private_chat` exports `PrivateChatView(parent=..., client=..., target=...,
+on_back=...)`; `gui.room_chat` exports `RoomChatView` with the same feature-view
+arguments; and `gui.files` may export `FilesView` with those arguments.
+Factories can also be passed directly to `ChatApplication`.
+
 ## Administrator announcements
 
 Administrators are identified by their exact registered usernames in the
@@ -183,8 +251,8 @@ currently connected clients.
 
 ## Server-wide moderation
 
-This version does not implement chat rooms, so moderation currently applies to
-the entire server. An administrator can use `kick` to disconnect an online
+Moderation applies to the entire server; there is no per-room moderation. An
+administrator can use `kick` to disconnect an online
 user or `ban` to persist a server-wide ban and disconnect that user if online.
 Banned users are refused at their next login, including after the server
 restarts. Both commands accept an optional reason.
@@ -192,3 +260,32 @@ restarts. Both commands accept an optional reason.
 Successful administrator announcements, kicks, and bans are recorded in the
 SQLite `admin_audit_log` table with the administrator username, UTC timestamp,
 action, target when applicable, and announcement text or moderation reason.
+
+## Chat rooms
+
+Clients can create and join named rooms and exchange messages with the other
+members who are online. Room commands in the client:
+
+| Command | What it does |
+|---|---|
+| `create` | Prompts for a room name, creates the room and joins it |
+| `join` | Prompts for a room name and joins an existing room |
+| `leave` | Prompts for a room name and leaves it |
+| `rooms` | Lists existing rooms |
+| `users` | Lists everyone online; enter a room name at the prompt to list that room's members (you must be a member) |
+| `room` | Prompts for a room name and a message, then sends it to every online member |
+
+Room names are 3–32 characters (letters, digits, `_` and `-`) and are
+case-insensitive. Rooms are held in server memory, so they are cleared when the
+server restarts, and room messages are delivered only to members who are
+online. A file can be sent to a room with `file` using `#room` as the target
+(for example `#general`) instead of a username.
+
+## File transfers
+
+After logging in, use `file` and enter a recipient username or `#room`, followed
+by the local file path. Files are limited to 1 MiB; both client and server
+enforce this limit. Recipients receive files in `received_files/` after the
+SHA-256 checksum is verified. Room transfers reach online room members only,
+with membership checked again when delivery begins. Uploads expire after 120
+seconds without a valid chunk.
