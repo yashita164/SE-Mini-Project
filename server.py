@@ -1759,6 +1759,9 @@ class ChatServer(socketserver.ThreadingTCPServer):
 
     def __init__(self, server_address, request_handler_class):
         super().__init__(server_address, request_handler_class)
+        with HEARTBEAT_LOCK:
+            HEARTBEAT_LAST_SEEN.clear()
+            HEARTBEAT_TOKENS.clear()
         self.ssl_context = None
         cert_file = os.environ.get("CHAT_TLS_CERT_FILE")
         key_file = os.environ.get("CHAT_TLS_KEY_FILE")
