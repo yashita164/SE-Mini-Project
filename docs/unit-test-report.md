@@ -44,6 +44,11 @@ above. CI installed the pinned version.
 
 The required verbose command completed successfully on the tested commit.
 
+An initial invocation with the system Python did not collect tests because
+that interpreter lacked `bcrypt` (`ModuleNotFoundError`). No test cases ran in
+that attempt. The command was rerun with the repository virtual environment
+on `PATH`; the results below are from that successful run.
+
 | Metric | Actual result |
 |---|---:|
 | Total tests collected | 172 |
