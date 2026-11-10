@@ -51,3 +51,43 @@ Room names are 3 to 32 characters (letters, digits, `_`, `-`) and are case-insen
 | TC-Grp-02 | CHAT-F-021 Join and leave | 1. `alice` creates the room, `bob` joins.<br>2. `bob` leaves.<br>3. Try to join a missing room or leave a room not joined. | Membership changes are announced to all participants. Error cases return clear errors. | `test_join_and_leave_update_membership_for_everyone`, `test_join_leave_error_cases` |
 | TC-Grp-03 | CHAT-F-022 Room broadcast | 1. `alice` and `bob` in the room, `carol` outside it.<br>2. `alice` sends a room message. | `alice` and `bob` receive it within the latency target. `carol` does not. Only online members receive it. Invalid room messages are rejected. | `test_room_message_reaches_all_online_members_only`, `test_room_message_rules` |
 | TC-Grp-04 | CHAT-F-023 Online user list | 1. `alice` and `bob` online, one room joined.<br>2. Request the global and the room user list.<br>3. `bob` disconnects.<br>4. A non-member requests the room list. | Global and per-room lists are correct. The lists refresh when someone connects or disconnects. A non-member cannot list a room's users. | `test_online_user_lists_global_and_per_room`, `test_disconnect_removes_user_from_rooms_and_notifies`, `test_non_member_cannot_list_room_users` |
+
+
+## 6. File transfer (CHAT-F-030, CHAT-F-031)
+
+The configured file size limit is 1 MiB (`MAX_FILE_SIZE` in `server.py`).
+
+| ID | Requirement | Steps | Expected result | Automated test |
+|---|---|---|---|---|
+| TC-File-01 | CHAT-F-030 Send file attachment | 1. `alice` sends a file to `bob` (online).<br>2. Repeat with an empty file and two transfers at once.<br>3. `alice` sends a file to a room with two members online and one member offline. | `bob` receives the file intact and the checksum matches. Empty files and parallel transfers work. Only the online room members receive the room file. | `test_file_transfer_preserves_bytes_and_checksum`, `test_file_transfer_supports_empty_file_and_isolated_transfer_ids`, `test_file_transfer_broadcasts_only_to_online_room_members`; `test_client.py`: `test_client_sends_file_to_room_in_bounded_chunks` |
+| TC-File-02 | CHAT-F-031 Reject oversized files | 1. `alice` starts a transfer larger than 1 MiB.<br>2. Start a transfer of exactly 1 MiB.<br>3. Start transfers with an invalid size, a missing size, or an unsafe file name. | The oversized file is rejected before any chunk is accepted, with an error to the sender. A file of exactly 1 MiB is accepted and intact. Invalid sizes, missing sizes and unsafe names are rejected. The client also refuses an oversized file before sending. | `test_file_transfer_rejects_file_over_configured_limit`, `test_file_transfer_at_exact_limit_is_accepted_and_intact`, `test_file_transfer_rejects_invalid_sizes_before_accepting_chunks`, `test_file_transfer_rejects_missing_size_and_unsafe_filename`; `test_client.py`: `test_client_rejects_oversized_file_before_sending` |
+
+## 7. Administration and moderation (CHAT-F-040 to CHAT-F-042)
+
+Administrators are the usernames listed in the `CHAT_ADMIN_USERS` environment variable. Moderation applies to the whole server; there is no per-room moderation (see [deviations](deviations.md)).
+
+| ID | Requirement | Steps | Expected result | Automated test |
+|---|---|---|---|---|
+| TC-Admin-01 | CHAT-F-040 Broadcast announcement | 1. Several users online.<br>2. An administrator broadcasts an announcement.<br>3. A non-administrator tries the same. | Every active client receives the announcement within the latency bound. The non-administrator is refused. | `test_tc_admin_01_announcement_reaches_all_active_clients_within_latency`, `test_tc_admin_01_non_admin_cannot_broadcast` |
+| TC-Admin-02 | CHAT-F-041 Kick and ban | 1. An administrator kicks `bob`.<br>2. An administrator bans `bob`.<br>3. `bob` tries to log in again. | A kick closes `bob`'s socket. A ban disconnects `bob` and later login attempts are refused. | `test_tc_admin_02_kick_closes_target_socket`, `test_tc_admin_02_ban_disconnects_and_refuses_later_login` |
+| TC-Admin-03 | CHAT-F-042 Audit log | 1. An administrator broadcasts, kicks and bans.<br>2. Inspect the audit records. | Every administrative action has an entry with the acting administrator and a timestamp. | `test_tc_admin_03_admin_actions_are_audited_with_actor_and_timestamp` |
+
+## 8. Non-functional (CHAT-NF-001 to CHAT-NF-005)
+
+| ID | Requirement | Steps | Expected result | Evidence |
+|---|---|---|---|---|
+| TC-Perf-01 | CHAT-NF-001 Latency | Run `scripts/measure_message_latency.py` with 100 concurrent clients and 1,000 private-message samples. | 95th-percentile latency is 500 ms or less. Recorded result: p95 = 23.461 ms (Pass). | `scripts/measure_message_latency.py`; raw data in `docs/performance/tc-perf-01-raw.csv` and `tc-perf-01-raw.metadata.json` |
+| TC-Scale-01 | CHAT-NF-002 200 concurrent connections | Run `scripts/measure_concurrent_clients.py` with 200 authenticated clients held for 5 seconds. | All 200 sessions stay active and none are dropped. Recorded result: 200 active, 0 dropped (Pass). | `scripts/measure_concurrent_clients.py`; raw data in `docs/performance/tc-scale-01-raw.csv` and `tc-scale-01-raw.metadata.json` |
+| TC-Rel-01 | CHAT-NF-003 Dead-connection cleanup | 1. Log in as `alice`.<br>2. Drop the connection without logging out.<br>3. Check presence and sessions. | The dead connection is detected and cleaned up within 30 seconds. | `test_silent_disconnect_is_removed_from_presence_and_session` |
+| TC-Ops-01 | CHAT-NF-004 90-day history | 1. Store messages older than today but inside 90 days, and one near the boundary.<br>2. Request history and page through it. | Messages up to 90 days old are returned. Pages do not skip or repeat messages. | `test_database.py`: `test_history_includes_messages_through_the_90_day_boundary`, `test_history_pages_do_not_skip_or_repeat_messages`; `test_server.py`: `test_history_request_pages_messages_across_the_90_day_window` |
+| TC-UX-01 | CHAT-NF-005 Non-blocking UI | 1. Simulate a slow network: the receiver waits on a partly sent server event.<br>2. Send a request from the client meanwhile. | The client can still send while the receiver is waiting, so the UI is not blocked. | `test_client.py`: `test_tc_ux_01_user_can_send_while_receiver_waits_on_slow_network` |
+
+## 9. Security (CHAT-SR-001 to CHAT-SR-005)
+
+| ID | Requirement | Steps | Expected result | Automated test |
+|---|---|---|---|---|
+| TC-Sec-01 | CHAT-SR-001 TLS | 1. Start the server with `CHAT_TLS_CERT_FILE` and `CHAT_TLS_KEY_FILE`.<br>2. Connect a client with `CHAT_TLS_ENABLED=1` and `CHAT_TLS_CA_FILE`.<br>3. Send and receive a message. | The TLS handshake succeeds and application data round-trips. TLS is optional and off by default. | `test_tls_handshake_round_trips_application_data` |
+| TC-Sec-02 | CHAT-SR-002 Password hashing | 1. Register users.<br>2. Inspect the database.<br>3. Register two users with the same password.<br>4. Check the server log. | Only bcrypt hashes are stored. The same password gives different hashes. No plaintext password appears in the log. | `test_auth.py`: `test_sec_02_password_is_hashed`, `test_sec_02_same_password_produces_different_hashes`, `test_sec_02_stored_hash_has_bcrypt_format`, `test_sec_02_database_contains_only_hashed_passwords`; `test_server.py`: `test_sec_02_no_plaintext_password_in_server_logs` |
+| TC-Sec-03 | CHAT-SR-003 Input validation | Send malformed JSON, wrong field types, oversized requests, control characters, NUL in a password, injection-style strings and invalid UTF-8. Then log in normally. | The server returns an error for each bad input (oversized requests get 413), does not crash, and still accepts the normal login. | `test_sr003_fuzz.py` (37 tests); `test_server.py`: `test_malformed_json_returns_error_and_connection_recovers` |
+| TC-Sec-04 | CHAT-SR-004 Session token | Send protected requests (message, history, typing, room commands) with no token, a wrong token and a valid token. | Requests with a missing or invalid token are refused. A valid token is accepted. | `test_session_token_is_required_for_protected_requests`, `test_unauthenticated_message_is_rejected`, `test_missing_or_bad_token_is_refused` (fuzz file) |
+| TC-Sec-05 | CHAT-SR-005 Per-IP rate limiting | 1. Send repeated failed logins from one address.<br>2. Make one successful login. | After the configured failures (default 5 in 60 s) further logins are throttled for the lockout period. A successful login clears the failure count. | `test_tc_sec_05_login_attempts_are_rate_limited_per_ip`, `test_tc_sec_05_successful_login_clears_failure_tracking` |
