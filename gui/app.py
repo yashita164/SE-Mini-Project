@@ -73,7 +73,7 @@ class ChatApplication:
         if importlib.util.find_spec(module_name) is None:
             return None
         module = importlib.import_module(module_name)
-        return getattr(module, class_name)
+        return getattr(module, class_name, None)
 
     def show_authentication(self) -> None:
         """Display the assigned authentication view or an integration prompt."""

@@ -21,6 +21,14 @@ from gui.app import ChatApplication
 import server
 
 
+def test_discover_view_loads_integrated_room_chat():
+    from gui.room_chat import RoomChatView
+
+    assert ChatApplication._discover_view(
+        "gui.room_chat", "RoomChatView"
+    ) is RoomChatView
+
+
 class ProtocolPeer:
     """Small socket-pair peer that responds using the production protocol."""
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import simpledialog, ttk
 from typing import Any, Callable
 
 from .client_core import ClientCore
@@ -59,11 +59,18 @@ class Dashboard(ttk.Frame):
 
         self.rooms_list = tk.Listbox(rooms_panel, exportselection=False)
         self.rooms_list.pack(fill="both", expand=True)
+        room_actions = ttk.Frame(rooms_panel)
+        room_actions.pack(fill="x", pady=(8, 0))
         ttk.Button(
-            rooms_panel,
+            room_actions,
+            text="Create room",
+            command=self._create_room,
+        ).pack(side="left", fill="x", expand=True, padx=(0, 4))
+        ttk.Button(
+            room_actions,
             text="Open group chat",
             command=self._open_room_chat,
-        ).pack(fill="x", pady=(8, 0))
+        ).pack(side="left", fill="x", expand=True, padx=(4, 0))
 
         footer = ttk.Frame(self)
         footer.pack(fill="x", pady=(12, 0))
@@ -107,6 +114,10 @@ class Dashboard(ttk.Frame):
             kind == "ROOM_RESPONSE" and event.get("status") == "OK"
         ):
             self.refresh()
+        elif kind == "ROOM_RESPONSE":
+            self.status_label.configure(
+                text=event.get("message", "Room operation failed.")
+            )
         elif kind == "ERROR":
             self.status_label.configure(text=event.get("message", "Server error."))
 
@@ -142,6 +153,22 @@ class Dashboard(ttk.Frame):
             self.on_navigate("room", self.rooms_list.get(selection[0]))
         else:
             self.status_label.configure(text="Select a room first.")
+
+    def _create_room(self) -> None:
+        room_name = simpledialog.askstring(
+            "Create room", "Room name:", parent=self.winfo_toplevel()
+        )
+        if room_name is None:
+            return
+        room_name = room_name.strip()
+        if not room_name:
+            self.status_label.configure(text="Room name is required.")
+            return
+        try:
+            self.client.create_room(room_name)
+            self.status_label.configure(text=f"Creating room {room_name}…")
+        except (ConnectionError, RuntimeError) as error:
+            self.status_label.configure(text=str(error))
 
     def _schedule_refresh(self) -> None:
         self._refresh_after_id = self.after(10_000, self._refresh_and_reschedule)
