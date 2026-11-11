@@ -145,16 +145,13 @@ in-memory room state. These are documented limitations, not test failures.
 The fresh performance results and raw data are saved under
 `docs/performance/validation-run/`.
 
-## 6. Defects and exit criteria
+## 6. Defects and test coverage
 
-| Issue criterion | Assessment |
-|---|---|
-| 100% of planned test cases executed | The 29 automated STP cases passed. Screenshots are included for the 8 GUI cases, but I did not rerun those manual steps for this report. I cannot confirm that every planned manual case was executed on this revision. |
-| 0 critical defects open | I checked GitHub for open issues with the `type:bug` label and found none. |
-| Report exists on `main` | Not yet. The report is on `docs/80-system-validation-report` at `866a961`; it has not been merged to `main`. |
-| Feature branch and PR referencing issue #80 | Not yet. A PR still needs to be opened. |
-| Independent review | Still needed. |
-| CI green | Still needed for the PR. The tests reported here were run locally, not in CI. |
+All 29 automated STP cases passed. No open GitHub issues with the
+`type:bug` label were found at the time of review. Screenshots are available
+for the eight GUI test cases; however, the manual GUI tests were not rerun
+for this validation, so their results are not included in the executed-case
+total.
 
 ## 7. Conclusion
 
