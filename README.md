@@ -161,8 +161,11 @@ $env:CHAT_LOGIN_RATE_LOCKOUT_SECONDS = "60"
 
 Throttled connections receive `LOGIN_RESPONSE` with code `429` and are closed.
 
-GitHub Actions runs this same command on every push and pull request using
-Python 3.13.
+GitHub Actions runs the complete test suite with Python 3.13 on pushes to
+`main`, pull requests targeting `main`, and manual dispatch. The workflow also
+publishes coverage and basic quality-check results. Its staging/production job
+is a simulation placeholder that is intentionally skipped; actual deployment
+and external hosting are outside this project's scope.
 
 ## Tkinter desktop GUI
 
