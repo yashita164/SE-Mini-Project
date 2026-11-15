@@ -1,0 +1,238 @@
+name: Chat Application CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-tests:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run test suite with coverage
+        id: tests
+        run: >-
+          python -m pytest -v
+          --junitxml=pytest-results.xml
+          --cov=.
+          --cov-report=term-missing
+          --cov-report=xml:coverage.xml
+
+      - name: Publish test summary
+        if: always()
+        env:
+          BRANCH_NAME: ${{ github.base_ref || github.ref_name }}
+          COMMIT_SHA: ${{ github.sha }}
+          JOB_STATUS: ${{ job.status }}
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
+        run: |
+          python - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          report = Path("pytest-results.xml")
+          counts = {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "errors": 0}
+          if report.exists():
+              root = ET.parse(report).getroot()
+              for case in root.findall(".//testcase"):
+                  counts["total"] += 1
+                  if case.find("error") is not None:
+                      counts["errors"] += 1
+                  elif case.find("failure") is not None:
+                      counts["failed"] += 1
+                  elif case.find("skipped") is not None:
+                      counts["skipped"] += 1
+                  else:
+                      counts["passed"] += 1
+
+          outcome = os.environ.get("TEST_OUTCOME", "unknown").upper()
+          with summary.open("a", encoding="utf-8") as output:
+              output.write("# Chat Application CI/CD — Backend Tests\n\n")
+              output.write(f"- **Branch:** `{os.environ['BRANCH_NAME']}`\n")
+              output.write(f"- **Commit:** `{os.environ['COMMIT_SHA']}`\n")
+              output.write(
+                  f"- **Job execution status:** **{os.environ['JOB_STATUS'].upper()}** "
+                  f"(test step: {outcome})\n"
+              )
+              output.write("| Test result | Count |\n|---|---:|\n")
+              for label, key in (
+                  ("Total tests", "total"),
+                  ("Passed", "passed"),
+                  ("Failed", "failed"),
+                  ("Skipped", "skipped"),
+                  ("Errors", "errors"),
+              ):
+                  output.write(f"| {label} | {counts[key]} |\n")
+              if not report.exists():
+                  output.write("\nJUnit report was not generated.\n")
+              coverage_report = Path("coverage.xml")
+              coverage = "Unavailable (coverage report was not generated)"
+              if coverage_report.exists():
+                  line_rate = float(
+                      ET.parse(coverage_report).getroot().get("line-rate", "0")
+                  )
+                  coverage = f"{line_rate * 100:.2f}% line coverage"
+              output.write(f"\n**Coverage:** {coverage}\n")
+              output.write("**Quality gate:** Pending in the next job.\n\n")
+              output.write(
+                  "\n**Deployment status:** SKIPPED — NO ACTUAL DEPLOYMENT. "
+                  "Actual deployment is outside this project's scope.\n"
+              )
+          PY
+
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          path: |
+            pytest-results.xml
+            coverage.xml
+          if-no-files-found: warn
+
+  coverage-quality-gate:
+    name: Coverage & Quality Gate
+    runs-on: ubuntu-latest
+    needs: backend-tests
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Download test and coverage reports
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-test-reports
+          path: reports
+
+      - name: Verify coverage report
+        id: coverage-report
+        run: python -c "from pathlib import Path; report = Path('reports/coverage.xml'); assert report.is_file() and report.stat().st_size > 0, 'Coverage report is missing or empty'"
+
+      - name: Check Python syntax
+        id: syntax
+        run: python -m compileall -q auth.py client.py database.py server.py gui tests scripts
+
+      - name: Check dependency consistency
+        id: dependencies
+        run: python -m pip check
+
+      - name: Publish coverage and quality summary
+        if: always()
+        env:
+          BRANCH_NAME: ${{ github.base_ref || github.ref_name }}
+          COMMIT_SHA: ${{ github.sha }}
+          BACKEND_JOB_RESULT: ${{ needs.backend-tests.result }}
+          COVERAGE_OUTCOME: ${{ steps.coverage-report.outcome }}
+          SYNTAX_OUTCOME: ${{ steps.syntax.outcome }}
+          DEPENDENCY_OUTCOME: ${{ steps.dependencies.outcome }}
+        run: |
+          python - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          coverage_report = Path("reports/coverage.xml")
+          coverage = "Unavailable (coverage report was not generated)"
+          if coverage_report.exists():
+              line_rate = float(ET.parse(coverage_report).getroot().get("line-rate", "0"))
+              coverage = f"{line_rate * 100:.2f}% line coverage"
+
+          junit_report = Path("reports/pytest-results.xml")
+          counts = {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "errors": 0}
+          if junit_report.exists():
+              for case in ET.parse(junit_report).getroot().findall(".//testcase"):
+                  counts["total"] += 1
+                  if case.find("error") is not None:
+                      counts["errors"] += 1
+                  elif case.find("failure") is not None:
+                      counts["failed"] += 1
+                  elif case.find("skipped") is not None:
+                      counts["skipped"] += 1
+                  else:
+                      counts["passed"] += 1
+
+          coverage_outcome = os.environ.get("COVERAGE_OUTCOME", "unknown").upper()
+          syntax = os.environ.get("SYNTAX_OUTCOME", "unknown").upper()
+          dependencies = os.environ.get("DEPENDENCY_OUTCOME", "unknown").upper()
+          gate = (
+              "PASSED"
+              if coverage_outcome == "SUCCESS"
+              and syntax == "SUCCESS"
+              and dependencies == "SUCCESS"
+              else "FAILED"
+          )
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          with summary.open("a", encoding="utf-8") as output:
+              output.write("# Chat Application CI/CD — Coverage & Quality Gate\n\n")
+              output.write(f"- **Branch:** `{os.environ['BRANCH_NAME']}`\n")
+              output.write(f"- **Commit:** `{os.environ['COMMIT_SHA']}`\n")
+              output.write(f"- **Job execution status:** **{gate}**\n\n")
+              output.write(
+                  f"**Backend Tests job:** {os.environ['BACKEND_JOB_RESULT'].upper()}\n\n"
+              )
+              output.write("| Test result | Count |\n|---|---:|\n")
+              for label, key in (
+                  ("Total tests", "total"),
+                  ("Passed", "passed"),
+                  ("Failed", "failed"),
+                  ("Skipped", "skipped"),
+                  ("Errors", "errors"),
+              ):
+                  output.write(f"| {label} | {counts[key]} |\n")
+              if not junit_report.exists():
+                  output.write("\nJUnit report is unavailable.\n")
+              output.write("\n")
+              output.write("| Check | Result |\n|---|---|\n")
+              output.write(f"| Coverage | {coverage} |\n")
+              output.write(f"| Coverage report generated | {coverage_outcome} |\n")
+              output.write(f"| Python syntax check | {syntax} |\n")
+              output.write(f"| Dependency consistency (`pip check`) | {dependencies} |\n")
+              output.write(f"| Quality gate | **{gate}** |\n\n")
+              output.write(
+                  "**Deployment status:** SKIPPED — NO ACTUAL DEPLOYMENT. "
+                  "Actual deployment is outside this project's scope.\n"
+              )
+          PY
+
+  deploy-simulation:
+    name: Deploy to Staging/Production (Simulation Only)
+    runs-on: ubuntu-latest
+    needs: coverage-quality-gate
+    # Deployment is outside this academic demonstration's scope; this job is intentionally skipped.
+    if: ${{ false }}
+    steps:
+      - name: Deployment intentionally not performed
+        run: echo "Skipped — no actual deployment is configured."
