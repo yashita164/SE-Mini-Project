@@ -161,11 +161,25 @@ $env:CHAT_LOGIN_RATE_LOCKOUT_SECONDS = "60"
 
 Throttled connections receive `LOGIN_RESPONSE` with code `429` and are closed.
 
-GitHub Actions runs the complete test suite with Python 3.13 on pushes to
-`main`, pull requests targeting `main`, and manual dispatch. The workflow also
-publishes coverage and basic quality-check results. Its staging/production job
-is a simulation placeholder that is intentionally skipped; actual deployment
-and external hosting are outside this project's scope.
+## CI/CD and Project Progress
+
+The [Chat Application CI/CD workflow](.github/workflows/ci-cd.yml) runs the full
+pytest suite with Python 3.13 on pushes to `main`, pull requests targeting
+`main`, and manual dispatch. It publishes JUnit and coverage reports,
+artifacts, and test/coverage summaries; the quality gate checks Python syntax
+and dependency consistency without an arbitrary coverage threshold.
+
+The **Deploy to Staging/Production (Simulation Only)** job is intentionally
+skipped. It performs no deployment, makes no external connection, and uses no
+deployment credentials. Actual deployment and external hosting are outside
+this project's scope.
+
+The [Project Progress & Sprint Milestones workflow](.github/workflows/project-progress.yml)
+summarizes the repository's documented Sprint 1–3 progress and reads GitHub
+milestone issue counts through the read-only `GITHUB_TOKEN`. Sprint status and
+milestone issue-completion percentages are shown separately. See
+[Sprint and Milestone Tracking](docs/SPRINTS_AND_MILESTONES.md) for the
+evidence-backed sprint record and manual milestone setup notes.
 
 ## Tkinter desktop GUI
 

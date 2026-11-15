@@ -42,7 +42,7 @@ jobs:
       - name: Publish test summary
         if: always()
         env:
-          BRANCH_NAME: ${{ github.base_ref || github.ref_name }}
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
           COMMIT_SHA: ${{ github.sha }}
           JOB_STATUS: ${{ job.status }}
           TEST_OUTCOME: ${{ steps.tests.outcome }}
@@ -55,28 +55,75 @@ jobs:
           summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
           report = Path("pytest-results.xml")
           counts = {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "errors": 0}
+          duration = None
+          report_status = "MISSING"
           if report.exists():
-              root = ET.parse(report).getroot()
-              for case in root.findall(".//testcase"):
-                  counts["total"] += 1
-                  if case.find("error") is not None:
-                      counts["errors"] += 1
-                  elif case.find("failure") is not None:
-                      counts["failed"] += 1
-                  elif case.find("skipped") is not None:
-                      counts["skipped"] += 1
+              try:
+                  root = ET.parse(report).getroot()
+                  report_status = "AVAILABLE"
+                  cases = root.findall(".//testcase")
+                  if root.tag == "testcase":
+                      cases = [root]
+                  for case in cases:
+                      counts["total"] += 1
+                      if case.find("error") is not None:
+                          counts["errors"] += 1
+                      elif case.find("failure") is not None:
+                          counts["failed"] += 1
+                      elif case.find("skipped") is not None:
+                          counts["skipped"] += 1
+                      else:
+                          counts["passed"] += 1
+
+                  suites = root.findall(".//testsuite")
+                  if root.tag == "testsuite":
+                      suites = [root]
+                  suite_times = [float(suite.get("time", "0")) for suite in suites]
+                  if suite_times:
+                      duration = sum(suite_times)
                   else:
-                      counts["passed"] += 1
+                      case_times = [
+                          float(case.get("time", "0"))
+                          for case in cases
+                      ]
+                      if case_times:
+                          duration = sum(case_times)
+              except (ET.ParseError, OSError, ValueError):
+                  report_status = "INVALID"
 
           outcome = os.environ.get("TEST_OUTCOME", "unknown").upper()
+          status = (
+              "SUCCESS"
+              if report_status == "AVAILABLE"
+              and outcome == "SUCCESS"
+              and counts["failed"] == 0
+              and counts["errors"] == 0
+              else "FAILED"
+          )
+          duration_text = f"{duration:.2f} seconds" if duration is not None else "Unavailable"
+
+          coverage_report = Path("coverage.xml")
+          coverage = "Unavailable"
+          if coverage_report.exists():
+              try:
+                  line_rate = float(
+                      ET.parse(coverage_report).getroot().get("line-rate", "")
+                  )
+                  coverage = f"{line_rate * 100:.2f}%"
+              except (ET.ParseError, OSError, ValueError):
+                  coverage = "Invalid report"
+
           with summary.open("a", encoding="utf-8") as output:
               output.write("# Chat Application CI/CD — Backend Tests\n\n")
+              output.write("**Workflow:** Chat Application CI/CD\n")
               output.write(f"- **Branch:** `{os.environ['BRANCH_NAME']}`\n")
               output.write(f"- **Commit:** `{os.environ['COMMIT_SHA']}`\n")
               output.write(
-                  f"- **Job execution status:** **{os.environ['JOB_STATUS'].upper()}** "
-                  f"(test step: {outcome})\n"
+                  f"- **Execution status:** **{status}** "
+                  f"(job: {os.environ['JOB_STATUS'].upper()}, test step: {outcome})\n"
               )
+              output.write(f"- **Test execution duration:** {duration_text}\n")
+              output.write(f"- **JUnit report:** {report_status}\n")
               output.write("| Test result | Count |\n|---|---:|\n")
               for label, key in (
                   ("Total tests", "total"),
@@ -86,16 +133,9 @@ jobs:
                   ("Errors", "errors"),
               ):
                   output.write(f"| {label} | {counts[key]} |\n")
-              if not report.exists():
-                  output.write("\nJUnit report was not generated.\n")
-              coverage_report = Path("coverage.xml")
-              coverage = "Unavailable (coverage report was not generated)"
-              if coverage_report.exists():
-                  line_rate = float(
-                      ET.parse(coverage_report).getroot().get("line-rate", "0")
-                  )
-                  coverage = f"{line_rate * 100:.2f}% line coverage"
-              output.write(f"\n**Coverage:** {coverage}\n")
+              output.write(f"\n**Code coverage:** {coverage}\n")
+              if report_status != "AVAILABLE":
+                  output.write(f"\nJUnit report status: **{report_status}**.\n")
               output.write("**Quality gate:** Pending in the next job.\n\n")
               output.write(
                   "\n**Deployment status:** SKIPPED — NO ACTUAL DEPLOYMENT. "
@@ -139,7 +179,7 @@ jobs:
 
       - name: Verify coverage report
         id: coverage-report
-        run: python -c "from pathlib import Path; report = Path('reports/coverage.xml'); assert report.is_file() and report.stat().st_size > 0, 'Coverage report is missing or empty'"
+        run: python -c "import xml.etree.ElementTree as ET; from pathlib import Path; report = Path('reports/coverage.xml'); assert report.is_file() and report.stat().st_size > 0, 'Coverage report is missing or empty'; rate = float(ET.parse(report).getroot().get('line-rate', '')); assert 0 <= rate <= 1, 'Coverage report has an invalid line-rate'"
 
       - name: Check Python syntax
         id: syntax
@@ -152,7 +192,7 @@ jobs:
       - name: Publish coverage and quality summary
         if: always()
         env:
-          BRANCH_NAME: ${{ github.base_ref || github.ref_name }}
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
           COMMIT_SHA: ${{ github.sha }}
           BACKEND_JOB_RESULT: ${{ needs.backend-tests.result }}
           COVERAGE_OUTCOME: ${{ steps.coverage-report.outcome }}
@@ -167,29 +207,42 @@ jobs:
           coverage_report = Path("reports/coverage.xml")
           coverage = "Unavailable (coverage report was not generated)"
           if coverage_report.exists():
-              line_rate = float(ET.parse(coverage_report).getroot().get("line-rate", "0"))
-              coverage = f"{line_rate * 100:.2f}% line coverage"
+              try:
+                  line_rate = float(
+                      ET.parse(coverage_report).getroot().get("line-rate", "")
+                  )
+                  coverage = f"{line_rate * 100:.2f}% line coverage"
+              except (ET.ParseError, OSError, ValueError):
+                  coverage = "Unavailable (coverage report is invalid)"
 
           junit_report = Path("reports/pytest-results.xml")
           counts = {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "errors": 0}
+          junit_status = "MISSING"
           if junit_report.exists():
-              for case in ET.parse(junit_report).getroot().findall(".//testcase"):
-                  counts["total"] += 1
-                  if case.find("error") is not None:
-                      counts["errors"] += 1
-                  elif case.find("failure") is not None:
-                      counts["failed"] += 1
-                  elif case.find("skipped") is not None:
-                      counts["skipped"] += 1
-                  else:
-                      counts["passed"] += 1
+              try:
+                  cases = ET.parse(junit_report).getroot().findall(".//testcase")
+                  for case in cases:
+                      counts["total"] += 1
+                      if case.find("error") is not None:
+                          counts["errors"] += 1
+                      elif case.find("failure") is not None:
+                          counts["failed"] += 1
+                      elif case.find("skipped") is not None:
+                          counts["skipped"] += 1
+                      else:
+                          counts["passed"] += 1
+                  junit_status = "AVAILABLE"
+              except (ET.ParseError, OSError):
+                  junit_status = "INVALID"
 
           coverage_outcome = os.environ.get("COVERAGE_OUTCOME", "unknown").upper()
           syntax = os.environ.get("SYNTAX_OUTCOME", "unknown").upper()
           dependencies = os.environ.get("DEPENDENCY_OUTCOME", "unknown").upper()
+          backend = os.environ.get("BACKEND_JOB_RESULT", "unknown").upper()
           gate = (
               "PASSED"
-              if coverage_outcome == "SUCCESS"
+              if backend == "SUCCESS"
+              and coverage_outcome == "SUCCESS"
               and syntax == "SUCCESS"
               and dependencies == "SUCCESS"
               else "FAILED"
@@ -200,9 +253,7 @@ jobs:
               output.write(f"- **Branch:** `{os.environ['BRANCH_NAME']}`\n")
               output.write(f"- **Commit:** `{os.environ['COMMIT_SHA']}`\n")
               output.write(f"- **Job execution status:** **{gate}**\n\n")
-              output.write(
-                  f"**Backend Tests job:** {os.environ['BACKEND_JOB_RESULT'].upper()}\n\n"
-              )
+              output.write(f"**Backend Tests job:** {backend}\n\n")
               output.write("| Test result | Count |\n|---|---:|\n")
               for label, key in (
                   ("Total tests", "total"),
@@ -212,8 +263,7 @@ jobs:
                   ("Errors", "errors"),
               ):
                   output.write(f"| {label} | {counts[key]} |\n")
-              if not junit_report.exists():
-                  output.write("\nJUnit report is unavailable.\n")
+              output.write(f"\n**JUnit report:** {junit_status}\n\n")
               output.write("\n")
               output.write("| Check | Result |\n|---|---|\n")
               output.write(f"| Coverage | {coverage} |\n")

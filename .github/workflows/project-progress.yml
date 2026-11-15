@@ -1,0 +1,59 @@
+name: Project Progress & Sprint Milestones
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/SPRINTS_AND_MILESTONES.md
+      - .github/workflows/project-progress.yml
+      - scripts/project_progress.py
+  pull_request:
+    branches:
+      - main
+    paths:
+      - docs/SPRINTS_AND_MILESTONES.md
+      - .github/workflows/project-progress.yml
+      - scripts/project_progress.py
+  issues:
+    types:
+      - opened
+      - closed
+      - reopened
+      - edited
+  milestone:
+    types:
+      - created
+      - edited
+      - opened
+      - closed
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number || github.event.milestone.number || github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  project-progress:
+    name: Sprint Overview & GitHub Milestones
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Generate project progress summary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          DASHBOARD_BRANCH: ${{ github.head_ref || github.ref_name }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: python scripts/project_progress.py
