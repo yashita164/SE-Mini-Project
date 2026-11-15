@@ -113,12 +113,33 @@ deployment or external hosting is performed.
 ## GitHub milestone source of truth
 
 Milestone titles, descriptions, issue counts, due dates, and state are read at
-workflow runtime from the repository's GitHub Milestones API. The workflow is
-read-only and never creates or edits milestones or issues. Repository
-inspection found no GitHub milestones configured; in that state the Actions
-summary reports **No GitHub milestones configured yet.** Sprint completion
-counts and milestone issue-completion percentages are displayed separately.
+workflow runtime from the repository's GitHub Milestones API. The
+`Project Progress & Sprint Milestones` workflow is read-only and never creates
+or edits milestones or issues. These milestones were created using the
+objectives above; due dates are unset because the original sprint dates were
+not recorded:
 
-To enable milestone progress tracking, repository maintainers can create
-milestones in **GitHub → Issues → Milestones** and assign existing issues as
-appropriate. The workflow does not make those decisions or changes.
+- **Sprint 1 – Initial Prototype**
+- **Sprint 2 – Chat Features and Reliability**
+- **Sprint 3 – Desktop GUI and Validation**
+
+The Iteration field on every item in the complete GitHub Projects board #1
+(`SE Mini-Project — Team 5 Chat Application`) is the source of truth for
+milestone membership. All 51 board items were retrieved; each links to an issue
+in this repository, and no pull requests or draft items were present. Existing
+issue labels were not used to override a board Iteration.
+
+| Milestone | Assigned issues |
+|---|---|
+| Sprint 1 – Initial Prototype | #1–#3, #5–#6, #8–#9, #13–#14, #17, #20–#22, #25 |
+| Sprint 2 – Chat Features and Reliability | #4, #7, #10–#12, #15–#16, #18–#19, #23–#24, #26–#41 |
+| Sprint 3 – Desktop GUI and Validation | #70–#74 |
+
+The board places issue #5 in Sprint 1; it is assigned to the Sprint 1
+milestone despite its conflicting issue labels. Issues #78–#82 are linked to
+the project board but have no Iteration value, so they are not assigned to a
+sprint milestone. No board item was missing a GitHub issue link.
+
+The progress summary calculates issue completion separately for each
+milestone. Sprint completion counts and milestone issue-completion
+percentages are distinct measures.
